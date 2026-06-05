@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WMS Enterprise Stream Console</title>
+    <style>
+        body { background-color: #0d1b2a; color: #e0e1dd; font-family: sans-serif; padding: 20px; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #415a77; padding-bottom: 10px; }
+        .status-bar { display: flex; gap: 20px; align-items: center; }
+        .conn-indicator { height: 12px; width: 12px; border-radius: 50%; display: inline-block; }
+        .online { background-color: #00f5d4; box-shadow: 0 0 8px #00f5d4; }
+        .offline { background-color: #ff5a5f; box-shadow: 0 0 8px #ff5a5f; }
+        .control-panel { background-color: #1b263b; padding: 15px; border-radius: 5px; border: 1px solid #415a77; margin-top: 15px; display: flex; gap: 10px; align-items: center; }
+        .control-panel input { padding: 8px; border-radius: 4px; border: 1px solid #415a77; background-color: #0d1b2a; color: #fff; }
+        .control-panel button { padding: 8px 15px; border-radius: 4px; border: none; background-color: #00b4d8; color: #0d1b2a; font-weight: bold; cursor: pointer; }
+        .matrix-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .matrix-table th, .matrix-table td { border: 1px solid #415a77; padding: 12px; text-align: left; }
+        .matrix-table th { background-color: #1b263b; color: #00b4d8; }
+        .update-flash { color: #f77f00; font-weight: bold; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <div class="header-container">
+        <h2>WMS Enterprise Stream Console</h2>
+        <div class="status-bar">
+            <span>Stream Status: <span id="indicator" class="conn-indicator offline"></span></span>
+            <div style="background:#1b263b; padding:5px 15px; border-radius:5px; border:1px solid #415a77;">
+                Active Devices: <span id="device-count">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-panel">
+        <strong>Push OTA Update:</strong>
+        <input type="text" id="version-input" placeholder="e.g., v3.0.1">
+        <button onclick="deployUpdate()">Deploy Update</button>
+        <span id="update-status" style="margin-left: 10px; color: #00b4d8;"></span>
+    </div>
+
+    <table class="matrix-table">
+        <thead>
+            <tr>
+                <th>Device Serial</th>
+                <th>Operating Zone</th>
+                <th>Firmware</th>
+                <th>Motor State</th>
+                <th>Filter Status</th>
+                <th>Fluid Volume</th>
+                <th>Vacuum Pressure</th>
+            </tr>
+        </thead>
+        <tbody id="device-rows"></tbody>
+    </table>
+
+    <script>
+        let devices = {};
+        let pendingTargetVersion = null;
+        let updateInProgress = false;
+        let eventSource = null;
+        
+        // Track unique devices that have explicitly sent a live packet AFTER the update button was clicked
+        let updatedLiveDevices = new Set();
+
+        function connectStream() {
+            if (eventSource) eventSource.close();
+            
+            eventSource = new EventSource('/api/v1/dashboard/stream');
+            const indicator = document.getElementById('indicator');
+
+            eventSource.onopen = () => {
+                indicator.className = 'conn-indicator online';
+            };
+
+            eventSource.onerror = () => {
+                indicator.className = 'conn-indicator offline';
+                eventSource.close();
+                setTimeout(connectStream, 2000);
+            };
+
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.serial_number) {
+                    devices[data.serial_number] = data;
+                    document.getElementById('device-count').textContent = Object.keys(devices).length;
+                    
+                    // If an update is running and this incoming packet matches our target, add it to our confirmed set
+                    if (updateInProgress && pendingTargetVersion && data.firmware.toLowerCase() === pendingTargetVersion.toLowerCase()) {
+                        updatedLiveDevices.add(data.serial_number);
+                    }
+                    
+                    renderTable();
+                    checkUpdateCompletion();
+                }
+            };
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('device-rows');
+            tbody.innerHTML = '';
+            Object.values(devices).forEach(dev => {
+                const isCurrentlyFlashing = updateInProgress && pendingTargetVersion && 
+                    dev.firmware.toLowerCase() !== pendingTargetVersion.toLowerCase();
+
+                const row = `<tr>
+                    <td><strong>${dev.serial_number}</strong></td>
+                    <td>${dev.zone}</td>
+                    <td><span class="${isCurrentlyFlashing ? 'update-flash' : ''}" style="color: #00b4d8;">${dev.firmware}</span></td>
+                    <td>${dev.motor_state}</td>
+                    <td>${dev.filter_status}</td>
+                    <td>${dev.fluid_volume}L</td>
+                    <td>${dev.vacuum_pressure} psi</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
+        }
+
+        function deployUpdate() {
+            const version = document.getElementById('version-input').value.trim();
+            if (!version) return alert('Please input a valid target string');
+            
+            // Reset our verification set for the new deployment window
+            updatedLiveDevices.clear();
+            pendingTargetVersion = version;
+            updateInProgress = true;
+            document.getElementById('update-status').textContent = `Broadcasting ${version}...`;
+            
+            fetch('/api/v1/firmware/deploy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ version: version })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('update-status').textContent = `Target set to ${version}. Waiting for fleet connection...`;
+            });
+        }
+
+        function checkUpdateCompletion() {
+            const totalDevices = Object.keys(devices).length;
+            if (totalDevices === 0 || !updateInProgress || !pendingTargetVersion) return;
+
+            // Strict Verification: Only refresh if EVERY known device has explicitly streamed a matching version packet
+            const allDevicesConfirmed = updatedLiveDevices.size === totalDevices;
+
+            if (allDevicesConfirmed) {
+                updateInProgress = false;
+                pendingTargetVersion = null;
+                updatedLiveDevices.clear();
+                document.getElementById('update-status').textContent = 'Fleet Synchronized! Refreshing...';
+                
+                // Introduce a 2-second buffer delay to allow the server's SQLite database to finish writing to disk
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            }
+        }
+
+        connectStream();
+    </script>
+</body>
+</html>

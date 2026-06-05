@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  gateway_server:
+    build:
+      context: ./src/server
+      dockerfile: Dockerfile
+    container_name: wms_gateway_server
+    ports:
+      - "5000:5000"
+    volumes:
+      - wms_production_storage:/app/database
+    networks:
+      - wms-secure-net
+    restart: unless-stopped
+
+  fleet_simulator:
+    build:
+      context: ./src/client
+      dockerfile: Dockerfile
+    container_name: wms_fleet_simulator
+    environment:
+      - GATEWAY_URL=http://wms_gateway_server:5000
+    networks:
+      - wms-secure-net
+    depends_on:
+      - gateway_server
+    restart: unless-stopped
+
+volumes:
+  wms_production_storage:
+    name: wms_production_storage
+
+networks:
+  wms-secure-net:
+    name: wms-secure-net
+    driver: bridge
