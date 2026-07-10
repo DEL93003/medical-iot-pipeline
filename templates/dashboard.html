@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WMS Enterprise Stream Console</title>
+    <link rel="icon" href="data:,">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 2rem; }
+        h1 { color: #f1f5f9; margin-bottom: 2rem; border-bottom: 2px solid #1e293b; padding-bottom: 1rem; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 2px solid #1e293b; padding-bottom: 1rem; }
+        h1 { margin: 0; border: none; padding: 0; }
+        .status-container { display: flex; align-items: center; gap: 1rem; }
+        .status-bubble { width: 12px; height: 12px; background-color: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #10b981; }
+        .auth-btn { background-color: #475569; color: #fff; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.8rem; }
+        .auth-btn.active { background-color: #10b981; }
+        table { width: 100%; border-collapse: collapse; background-color: #1e293b; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #334155; }
+        th { background-color: #0f172a; color: #38bdf8; font-weight: 600; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em; }
+        tr:hover { background-color: #24334d; }
+        .metric { font-family: monospace; font-weight: bold; color: #38bdf8; }
+        .warn { color: #f59e0b; }
+        .danger { color: #ef4444; }
+        .update-btn { background-color: #0284c7; color: #fff; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.8rem; transition: background 0.2s; }
+        .update-btn:hover { background-color: #0369a1; }
+    </style>
+</head>
+<body>
+
+    <div class="header-container">
+        <h1>WMS Enterprise Stream Console</h1>
+        <div class="status-container">
+            <button id="auth-status-btn" class="auth-btn" onclick="requestDebugToken()">Key: Unlocked</button>
+            <span>Stream Status: Active</span>
+            <span class="status-bubble"></span>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Device Serial</th>
+                <th>Operating Zone</th>
+                <th>Firmware</th>
+                <th>Motor State</th>
+                <th>Filter Status</th>
+                <th>Fluid Volume</th>
+                <th>Vacuum Pressure</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="device-rows">
+            </tbody>
+    </table>
+
+    <script>
+        const eventSource = new EventSource("/api/v1/dashboard/stream");
+        const deviceRegistry = {};
+
+        // On boot, auto-fetch a token to keep the developer environment seamless
+        if (!localStorage.getItem('jwt_token')) {
+            requestDebugToken();
+        } else {
+            updateAuthUI(true);
+        }
+
+        function requestDebugToken() {
+            fetch('/api/v1/auth/token', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if(data.token) {
+                        localStorage.setItem('jwt_token', data.token);
+                        updateAuthUI(true);
+                        console.log("Secure token initialized and saved to local storage.");
+                    }
+                })
+                .catch(err => console.error("Auth seeding error:", err));
+        }
+
+        function updateAuthUI(isAuthed) {
+            const btn = document.getElementById('auth-status-btn');
+            if (isAuthed) {
+                btn.innerText = "Secured Session";
+                btn.classList.add('active');
+            }
+        }
+
+        eventSource.onmessage = function(event) {
+            try {
+                const device = JSON.parse(event.data);
+                if (device.serial_number) {
+                    deviceRegistry[device.serial_number] = device;
+                }
+
+                const tbody = document.getElementById('device-rows');
+                let htmlBuffer = "";
+
+                Object.keys(deviceRegistry).forEach(serial => {
+                    const data = deviceRegistry[serial];
+                    
+                    const zone = data.zone || "N/A";
+                    const firmware = data.firmware || "v1.0.0";
+                    const motorState = data.motor_state || "Operational";
+                    const filterStatus = data.filter_status || "Good";
+                    
+                    const fluidVolume = data.fluid_volume !== undefined ? parseFloat(data.fluid_volume).toFixed(2) : "0.00";
+                    const vacuumPressure = data.vacuum_pressure !== undefined ? parseFloat(data.vacuum_pressure).toFixed(1) : "0.0";
+
+                    let filterClass = "";
+                    if (filterStatus === "Replacement Required" || filterStatus === "Critical") filterClass = "danger";
+                    else if (filterStatus === "Check Status" || filterStatus === "Warning") filterClass = "warn";
+
+                    htmlBuffer += `
+                        <tr>
+                            <td><strong>${serial}</strong></td>
+                            <td>${zone}</td>
+                            <td>${firmware}</td>
+                            <td>${motorState}</td>
+                            <td class="${filterClass}">${filterStatus}</td>
+                            <td class="metric">${fluidVolume}L</td>
+                            <td class="metric">${vacuumPressure} psi</td>
+                            <td>
+                                <button class="update-btn" onclick="triggerUpdate('${serial}')">Push Update</button>
+                                <button class="flush-btn" style="background-color: #dc2626; color: white; border: none; padding: 5px 10px; margin-left: 6px; cursor: pointer; border-radius: 4px; font-weight: bold;" onclick="executeCommand('${serial}', 'flush_filter')">Flush Filter</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                tbody.innerHTML = htmlBuffer;
+            } catch (err) {
+                console.error("Stream parse synchronization issue:", err);
+            }
+        };
+
+        function triggerUpdate(serialNumber) {
+            if(!confirm(`Confirm pushing firmware update package to node ${serialNumber}?`)) return;
+            
+            const token = localStorage.getItem('jwt_token');
+
+            fetch('/api/v1/deploy-firmware', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` // Attach the JWT bearer credentials
+                },
+                body: JSON.stringify({ serial_number: serialNumber })
+            })
+            .then(res => {
+                if (res.status === 401) throw new Error("Session expired or token invalid");
+                return res.json();
+            })
+            .then(data => alert(`Deployment Sequence: ${data.message}`))
+            .catch(err => alert(`Action Blocked: ${err.message}`));
+        }
+
+        function executeCommand(serialNumber, commandName) {
+            if(!confirm(`Confirm dispatching raw [${commandName}] override payload to node ${serialNumber}?`)) return;
+            
+            const token = localStorage.getItem("jwt_token");
+            fetch("/api/v1/execute-command", {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ serial_number: serialNumber, command: commandName })
+            })
+            .then(res => {
+                if (res.status === 401) throw new Error("Session expired or token invalid");
+                return res.json();
+            })
+            .then(data => alert(`Command Engine: ${data.message}`))
+            .catch(err => alert(`Command Blocked: ${err.message}`));
+        }
+
+        eventSource.onerror = function() {
+            console.log("Re-aligning secure tunnel socket handshake...");
+        };
+    </script>
+</body>
+</html>

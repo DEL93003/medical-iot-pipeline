@@ -1,161 +1,107 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>WMS Enterprise Stream Console</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Operations Command Center</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #0d1b2a; color: #e0e1dd; font-family: sans-serif; padding: 20px; }
-        .header-container { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #415a77; padding-bottom: 10px; }
-        .status-bar { display: flex; gap: 20px; align-items: center; }
-        .conn-indicator { height: 12px; width: 12px; border-radius: 50%; display: inline-block; }
-        .online { background-color: #00f5d4; box-shadow: 0 0 8px #00f5d4; }
-        .offline { background-color: #ff5a5f; box-shadow: 0 0 8px #ff5a5f; }
-        .control-panel { background-color: #1b263b; padding: 15px; border-radius: 5px; border: 1px solid #415a77; margin-top: 15px; display: flex; gap: 10px; align-items: center; }
-        .control-panel input { padding: 8px; border-radius: 4px; border: 1px solid #415a77; background-color: #0d1b2a; color: #fff; }
-        .control-panel button { padding: 8px 15px; border-radius: 4px; border: none; background-color: #00b4d8; color: #0d1b2a; font-weight: bold; cursor: pointer; }
-        .matrix-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        .matrix-table th, .matrix-table td { border: 1px solid #415a77; padding: 12px; text-align: left; }
-        .matrix-table th { background-color: #1b263b; color: #00b4d8; }
-        .update-flash { color: #f77f00; font-weight: bold; animation: blink 1s infinite; }
-        @keyframes blink { 50% { opacity: 0; } }
+        body { background-color: #12141c; color: #e4e6eb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .navbar { background-color: #1a1d29; border-bottom: 1px solid #2d3142; }
+        .card { background-color: #1a1d29; border: 1px solid #2d3142; border-radius: 8px; }
+        .status-good { color: #2ecc71; font-weight: bold; }
+        .status-alert { color: #e74c3c; font-weight: bold; animation: pulse 2s infinite; }
+        .table { color: #e4e6eb; vertical-align: middle; }
+        .table-dark { --bs-table-bg: #1a1d29; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
+    <meta http-equiv="refresh" content="3">
 </head>
 <body>
-    <div class="header-container">
-        <h2>WMS Enterprise Stream Console</h2>
-        <div class="status-bar">
-            <span>Stream Status: <span id="indicator" class="conn-indicator offline"></span></span>
-            <div style="background:#1b263b; padding:5px 15px; border-radius:5px; border:1px solid #415a77;">
-                Active Devices: <span id="device-count">0</span>
+
+    <nav class="navbar navbar-dark px-4 py-3">
+        <div class="container-fluid d-flex justify-content-between align-items-center">
+            <span class="navbar-brand mb-0 h1 text-uppercase tracking-wider">🛰️ Fleet Operations Command Center</span>
+            <span class="badge bg-success p-2">🔒 Secure Pipeline Active (JWT-Protected)</span>
+        </div>
+    </nav>
+
+    <div class="container-fluid p-4">
+        <div class="row g-4 mb-4">
+            <div class="col-md-4">
+                <div class="card p-4 d-flex flex-column justify-content-between">
+                    <h6 class="text-muted text-uppercase small">Total Monitored Fleet Assets</h6>
+                    <h2 class="display-5 fw-bold text-info">3 Active Nodes</h2>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card p-4 d-flex flex-column justify-content-between">
+                    <h6 class="text-muted text-uppercase small">System Status Architecture</h6>
+                    <h2 class="display-5 fw-bold text-success">Dual-Mode Hybrid</h2>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card p-4 d-flex flex-column justify-content-between">
+                    <h6 class="text-muted text-uppercase small">Active System Alert Gate</h6>
+                    <h2 class="display-5 fw-bold text-danger">Asynchronous</h2>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-4">
+            <h4 class="mb-4 fw-semibold text-white d-flex align-items-center justify-content-between">
+                <span>📊 Live Ingested Telemetry Feed (Auto-Refreshing)</span>
+                <span class="fs-6 text-muted font-monospace">Last updated: {{ current_time }}</span>
+            </h4>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0">
+                    <thead>
+                        <tr class="text-muted text-uppercase small border-bottom border-secondary">
+                            <th>Node Identifier</th>
+                            <th>Facility Zone / Aisle Location</th>
+                            <th>Firmware Version</th>
+                            <th>Operational State</th>
+                            <th>System Status Condition</th>
+                            <th>Secondary Metric (Liters / Battery)</th>
+                            <th>Primary Critical Metric (Pressure / Temp)</th>
+                            <th>Timestamp Ingested</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if not logs %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">No data packets currently stored in local database volume.</td>
+                        </tr>
+                        {% endif %}
+                        {% for row in logs %}
+                        <tr class="border-bottom border-dark">
+                            <td class="fw-bold text-white font-monospace">{{ row[1] }}</td>
+                            <td>{{ row[2] }}</td>
+                            <td><span class="badge bg-secondary font-monospace">{{ row[3] }}</span></td>
+                            <td>{{ row[4] }}</td>
+                            <td>
+                                {% if 'Required' in row[5] or 'Overheating' in row[4] %}
+                                <span class="status-alert">⚠️ CRITICAL CRASH RISK</span>
+                                {% else %}
+                                <span class="status-good">🟩 NOMINAL</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ row[6] }}</td>
+                            <td class="fw-bold">
+                                {% if row[7] > 23.0 or row[7] > 80.0 %}
+                                <span class="text-danger">{{ row[7] }}</span>
+                                {% else %}
+                                <span class="text-success">{{ row[7] }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-muted font-monospace small">{{ row[8] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    <div class="control-panel">
-        <strong>Push OTA Update:</strong>
-        <input type="text" id="version-input" placeholder="e.g., v3.0.1">
-        <button onclick="deployUpdate()">Deploy Update</button>
-        <span id="update-status" style="margin-left: 10px; color: #00b4d8;"></span>
-    </div>
-
-    <table class="matrix-table">
-        <thead>
-            <tr>
-                <th>Device Serial</th>
-                <th>Operating Zone</th>
-                <th>Firmware</th>
-                <th>Motor State</th>
-                <th>Filter Status</th>
-                <th>Fluid Volume</th>
-                <th>Vacuum Pressure</th>
-            </tr>
-        </thead>
-        <tbody id="device-rows"></tbody>
-    </table>
-
-    <script>
-        let devices = {};
-        let pendingTargetVersion = null;
-        let updateInProgress = false;
-        let eventSource = null;
-        
-        // Track unique devices that have explicitly sent a live packet AFTER the update button was clicked
-        let updatedLiveDevices = new Set();
-
-        function connectStream() {
-            if (eventSource) eventSource.close();
-            
-            eventSource = new EventSource('/api/v1/dashboard/stream');
-            const indicator = document.getElementById('indicator');
-
-            eventSource.onopen = () => {
-                indicator.className = 'conn-indicator online';
-            };
-
-            eventSource.onerror = () => {
-                indicator.className = 'conn-indicator offline';
-                eventSource.close();
-                setTimeout(connectStream, 2000);
-            };
-
-            eventSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.serial_number) {
-                    devices[data.serial_number] = data;
-                    document.getElementById('device-count').textContent = Object.keys(devices).length;
-                    
-                    // If an update is running and this incoming packet matches our target, add it to our confirmed set
-                    if (updateInProgress && pendingTargetVersion && data.firmware.toLowerCase() === pendingTargetVersion.toLowerCase()) {
-                        updatedLiveDevices.add(data.serial_number);
-                    }
-                    
-                    renderTable();
-                    checkUpdateCompletion();
-                }
-            };
-        }
-
-        function renderTable() {
-            const tbody = document.getElementById('device-rows');
-            tbody.innerHTML = '';
-            Object.values(devices).forEach(dev => {
-                const isCurrentlyFlashing = updateInProgress && pendingTargetVersion && 
-                    dev.firmware.toLowerCase() !== pendingTargetVersion.toLowerCase();
-
-                const row = `<tr>
-                    <td><strong>${dev.serial_number}</strong></td>
-                    <td>${dev.zone}</td>
-                    <td><span class="${isCurrentlyFlashing ? 'update-flash' : ''}" style="color: #00b4d8;">${dev.firmware}</span></td>
-                    <td>${dev.motor_state}</td>
-                    <td>${dev.filter_status}</td>
-                    <td>${dev.fluid_volume}L</td>
-                    <td>${dev.vacuum_pressure} psi</td>
-                </tr>`;
-                tbody.innerHTML += row;
-            });
-        }
-
-        function deployUpdate() {
-            const version = document.getElementById('version-input').value.trim();
-            if (!version) return alert('Please input a valid target string');
-            
-            // Reset our verification set for the new deployment window
-            updatedLiveDevices.clear();
-            pendingTargetVersion = version;
-            updateInProgress = true;
-            document.getElementById('update-status').textContent = `Broadcasting ${version}...`;
-            
-            fetch('/api/v1/firmware/deploy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ version: version })
-            })
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('update-status').textContent = `Target set to ${version}. Waiting for fleet connection...`;
-            });
-        }
-
-        function checkUpdateCompletion() {
-            const totalDevices = Object.keys(devices).length;
-            if (totalDevices === 0 || !updateInProgress || !pendingTargetVersion) return;
-
-            // Strict Verification: Only refresh if EVERY known device has explicitly streamed a matching version packet
-            const allDevicesConfirmed = updatedLiveDevices.size === totalDevices;
-
-            if (allDevicesConfirmed) {
-                updateInProgress = false;
-                pendingTargetVersion = null;
-                updatedLiveDevices.clear();
-                document.getElementById('update-status').textContent = 'Fleet Synchronized! Refreshing...';
-                
-                // Introduce a 2-second buffer delay to allow the server's SQLite database to finish writing to disk
-                setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
-            }
-        }
-
-        connectStream();
-    </script>
 </body>
 </html>

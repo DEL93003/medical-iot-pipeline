@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fleet Operations Command Center</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 40px; }
+        h1, h2 { color: #38bdf8; letter-spacing: -0.5px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; margin-bottom: 40px; background-color: #1e293b; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 14px 20px; text-align: left; border-bottom: 1px solid #334155; }
+        th { background-color: #0f172a; color: #94a3b8; font-size: 13px; text-transform: uppercase; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+        .optimal { background-color: #065f46; color: #34d399; }
+        .warning { background-color: #991b1b; color: #fca5a5; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <h1>🚨 FLEET OPERATIONS COMMAND CENTER</h1>
+    <hr style="border-color: #334155;">
+
+    <h2>Active Live Nodes</h2>
+    <table>
+        <tr>
+            <th>Device Serial</th>
+            <th>Facility Zone</th>
+            <th>Firmware</th>
+            <th>Motor State</th>
+            <th>Filter Status</th>
+            <th>Fluid Vol (L)</th>
+            <th>Vacuum Press (kPa)</th>
+        </tr>
+        {% for node in nodes %}
+        <tr>
+            <td style="font-family: monospace; font-weight: bold; color: #38bdf8;">{{ node.serial_number }}</td>
+            <td>{{ node.zone }}</td>
+            <td>{{ node.firmware }}</td>
+            <td>{{ node.motor_state }}</td>
+            <td><span class="badge {% if 'WARNING' in node.filter_status %}warning{% else %}optimal{% endif %}">{{ node.filter_status }}</span></td>
+            <td>{{ node.fluid_volume }}</td>
+            <td>{{ node.vacuum_pressure }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Critical System Incidents (Database Trigger Log)</h2>
+    <table>
+        <tr>
+            <th>Alert ID</th>
+            <th>Device</th>
+            <th>Location</th>
+            <th>Trigger Issue</th>
+            <th>Captured Metric</th>
+            <th>Timestamp</th>
+        </tr>
+        {% if not alerts %}
+        <tr>
+            <td colspan="6" style="text-align: center; color: #64748b; font-style: italic;">All systems tracking inside optimal parameters. No incidents reported.</td>
+        </tr>
+        {% endif %}
+        {% for alert in alerts %}
+        <tr>
+            <td>#{{ alert.alert_id }}</td>
+            <td style="font-family: monospace; color: #fca5a5;">{{ alert.serial_number }}</td>
+            <td>{{ alert.zone }}</td>
+            <td><span class="badge warning">{{ alert.issue_type }}</span></td>
+            <td><strong>{{ alert.recorded_value }} kPa</strong></td>
+            <td style="color: #64748b;">{{ alert.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+</body>
+</html>
