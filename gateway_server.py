@@ -49,8 +49,26 @@ def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         from flask import request
-        # Inject our verified administrative session profile directly into the thread context
-        request.token_user = "dale_admin"
+        token = None
+        
+        # Check if the Authorization header is present
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ")[1]
+        
+        if not token:
+            return jsonify({"message": "Access Denied: Token is missing!"}), 401
+            
+        try:
+            # Cryptographically verify signature and expiration window
+            data = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
+            request.token_user = data["user"]
+        except jwt.ExpiredSignatureError:
+            return jsonify({"message": "Access Denied: Token has expired!"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"message": "Access Denied: Invalid cryptographic token!"}), 401
+            
         return f(*args, **kwargs)
     return decorated
 
