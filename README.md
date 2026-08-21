@@ -54,3 +54,7 @@ A production-style Grafana dashboard connected to TimescaleDB (PostgreSQL) provi
 
 ### Configuration & Export
 * Exported dashboard schema is version-controlled under `grafana/dashboards/medical_iot_dashboard.json`.
+
+### Automated Dashboard Provisioning (IaC)
+* **Provisioning Provider:** `grafana/provisioning/dashboards/dashboards.yaml`
+* Dashboards located in `grafana/dashboards/` are mounted and loaded into the `Fleet Telemetry` folder on container startup.
