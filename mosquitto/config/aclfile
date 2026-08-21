@@ -1,0 +1,17 @@
+# =================================================================
+# MQTT Access Control Lists (ACL) - Least-Privilege Policy
+# =================================================================
+
+# --- Administrator (Full Access) ---
+user admin
+topic readwrite #
+topic readwrite $SYS/#
+
+# --- Edge Device Simulator (Write-Only on Telemetry & Alerts) ---
+user wms_device
+topic write hospital/devices/+/telemetry
+topic write hospital/devices/+/alerts
+
+# --- Backend Gateway Ingestion Engine (Read-Only) ---
+user wms_gateway
+topic read hospital/devices/#

@@ -58,3 +58,13 @@ A production-style Grafana dashboard connected to TimescaleDB (PostgreSQL) provi
 ### Automated Dashboard Provisioning (IaC)
 * **Provisioning Provider:** `grafana/provisioning/dashboards/dashboards.yaml`
 * Dashboards located in `grafana/dashboards/` are mounted and loaded into the `Fleet Telemetry` folder on container startup.
+
+---
+
+## 🔒 Implemented Security Hardening: MQTT Topic ACLs & Authentication
+
+* **RBAC & Authentication:** Enforced username/password authentication using salted SHA-512 hashes via `passwordfile`.
+* **Least-Privilege Topic Access Control (ACLs):**
+  * `wms_device`: Write-only access strictly bounded to `hospital/devices/+/telemetry` and `hospital/devices/+/alerts`.
+  * `wms_gateway`: Read-only access across `hospital/devices/#` ingestion hierarchy.
+  * Anonymous MQTT traffic is explicitly denied (`allow_anonymous false`).
