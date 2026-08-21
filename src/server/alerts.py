@@ -1,26 +1,18 @@
-import os
-import sys
-
-# Color formatting helpers for the container logs
-GREEN = "\033[92m"
-RED = "\033[91m"
-BOLD = "\033[1m"
-RESET = "\033[0m"
+import requests
 
 def dispatch_critical_alert(device_serial, zone, condition_type, current_value):
-    """
-    Handles event-driven dispatching for hardware warnings.
-    Simulates a secure outbound integration webhook (e.g., Slack, PagerDuty, or SMTP).
-    """
-    print(f"\n{RED}{BOLD}[ALERT ENGINE] 🚨 CRITICAL HARDWARE STATE DETECTED{RESET}")
-    print(f"==================================================")
-    print(f"• Target Node:  {device_serial}")
-    print(f"• Facility Zone: {zone}")
-    print(f"• Condition:     {condition_type}")
-    print(f"• Metric Value:  {current_value}")
-    print(f"==================================================")
-    
-    # Simulate a webhook POST request or an SMTP dispatch loop
-    print(f"{GREEN}[ALERT ENGINE] Successfully dispatched JSON payload block to downstream Webhook endpoint.{RESET}\n")
-    sys.stdout.flush()
-    return True
+    payload = {
+        "device_serial": device_serial,
+        "zone": zone,
+        "condition_type": condition_type,
+        "current_value": current_value
+    }
+    url = "http://ticketing_service:6000/webhook"
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code == 201:
+            print(f"[ALERT HOOK] Telemetry event successfully dispatched to Ticketing Module.", flush=True)
+        else:
+            print(f"[ALERT HOOK WARNING] Webhook dropped with status: {response.status_code}", flush=True)
+    except Exception as err:
+        print(f"[ALERT ENGINE ERROR] Webhook delivery failed: {err}", flush=True)

@@ -1,86 +1,59 @@
+import json
+import logging
 import os
-import sys
-import time
-import requests
 import random
-import signal
+import ssl
+import time
+import paho.mqtt.client as mqtt
 
-base_gateway_url = os.getenv("GATEWAY_URL", "http://wms_gateway_server:5000")
-auth_url = f"{base_gateway_url}/api/v1/auth/token"
-telemetry_url = f"{base_gateway_url}/api/v1/telemetry"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-print("Boot Sync Sequence Initiated...", flush=True)
+MQTT_HOST = os.getenv("MQTT_HOST", "iot_broker")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
+MQTT_USER = os.getenv("MQTT_USER", "wms_device")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "device_secure_pass")
+CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
 
-# 🔑 Fetch a secure JWT Token on startup
-jwt_token = None
-for attempt in range(10):
-    try:
-        print(f"Requesting secure token authorization payload (Attempt {attempt+1}/10)...", flush=True)
-        res = requests.post(auth_url, timeout=3)
-        if res.status_code == 200:
-            jwt_token = res.json().get("token")
-            print("Secure JWT token acquired and cached successfully!", flush=True)
-            break
-    except Exception as e:
-        print(f"Auth synchronization delay: {str(e)}", flush=True)
-    time.sleep(2)
-
-if not jwt_token:
-    print("❌ Critical Error: Could not verify identity with backend gateway. Exiting.", flush=True)
-    sys.exit(1)
-
-devices = [
-    {"serial_number": "WMS-X101", "zone": "North-Wing", "firmware": "v1.0.0"},
-    {"serial_number": "WMS-Y202", "zone": "South-ICU", "firmware": "v1.0.0"},
-    {"serial_number": "WMS-Z303", "zone": "West-Surgery", "firmware": "v1.0.0"}
+DEVICES = [
+    {"serial": "WMS-OR-01", "zone": "OR-1", "firmware": "v2.1.0"},
+    {"serial": "WMS-OR-02", "zone": "OR-2", "firmware": "v2.1.0"},
+    {"serial": "WMS-ICU-01", "zone": "ICU-North", "firmware": "v2.0.4"},
+    {"serial": "WMS-ED-01", "zone": "ED-Trauma", "firmware": "v2.2.0"}
 ]
 
-running = True
+client = mqtt.Client(client_id="medical_wms_simulator")
+client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
-def handle_shutdown(signum, frame):
-    global running
-    print("\nGracefully idling out device simulator cluster pipeline...", flush=True)
-    running = False
+if os.path.exists(CA_CERT_PATH):
+    client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+    client.tls_insecure_set(True)
 
-signal.signal(signal.SIGTERM, handle_shutdown)
-signal.signal(signal.SIGINT, handle_shutdown)
-
-print("Entering active telemetry streaming state loop.\n", flush=True)
-
-while running:
-    for dev in devices:
-        # Generate some mock telemetry drift values
-        if dev["serial_number"] == "WMS-Z303":
-            # Keep this node triggering the hardware alerts
-            filter_status = "Replacement Required"
-            fluid_volume = round(random.uniform(2.60, 2.85), 2)
-            vacuum_pressure = round(random.uniform(23.0, 24.5), 1)
-            motor_state = "Calibrating"
-        else:
-            filter_status = "Good"
-            fluid_volume = round(random.uniform(1.10, 2.65), 2)
-            vacuum_pressure = round(random.uniform(19.5, 23.5), 1)
-            motor_state = "Idle" if dev["serial_number"] == "WMS-X101" else "Calibrating"
-
-        payload = {
-            "serial_number": dev["serial_number"],
-            "zone": dev["zone"],
-            "firmware": dev["firmware"],
-            "motor_state": motor_state,
-            "filter_status": filter_status,
-            "fluid_volume": fluid_volume,
-            "vacuum_pressure": vacuum_pressure
-        }
-
+def run_simulator():
+    while True:
         try:
-            # Attach the cached bearer token header to satisfy our token_required decorator
-            headers = {
-                "Authorization": f"Bearer {jwt_token}",
-                "Content-Type": "application/json"
-            }
-            response = requests.post(telemetry_url, json=payload, headers=headers, timeout=2)
-            print(f"[STREAM] Outbound packet {dev['serial_number']} -> Status: {response.status_code}", flush=True)
-        except Exception as err:
-            print(f"[STREAM ERROR] Disconnect on {dev['serial_number']}: {str(err)}", flush=True)
+            client.connect(MQTT_HOST, MQTT_PORT, 60)
+            break
+        except Exception as e:
+            logging.error(f"Connection failed: {e}. Retrying in 3s...")
+            time.sleep(3)
 
-    time.sleep(3)
+    client.loop_start()
+
+    while True:
+        for dev in DEVICES:
+            payload = {
+                "serial_number": dev["serial"],
+                "zone": dev["zone"],
+                "firmware": dev["firmware"],
+                "motor_state": "RUNNING" if random.random() > 0.1 else "STANDBY",
+                "filter_status": "Good" if random.random() > 0.05 else "Replacement Required",
+                "vacuum_pressure": round(random.uniform(120.0, 180.0), 1),
+                "fluid_volume": round(random.uniform(0.5, 4.0), 2)
+            }
+            topic = f"hospital/devices/{dev['serial']}/telemetry"
+            client.publish(topic, json.dumps(payload))
+            logging.info(f"Published telemetry to {topic}")
+        time.sleep(3)
+
+if __name__ == "__main__":
+    run_simulator()

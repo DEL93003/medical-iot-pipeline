@@ -47,6 +47,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./logs:/app/logs
+      - ./mosquitto/certs:/app/certs
     secrets:
       - pg_user
       - pg_password
@@ -55,6 +56,7 @@ services:
       - PG_HOST=iot_database
       - PG_DB=iot_telemetry
       - MQTT_HOST=iot_broker
+      - MQTT_PORT=8883
       - MQTT_USER=wms_gateway
       - MQTT_PASSWORD=gateway_secure_pass
       - PG_USER_FILE=/run/secrets/pg_user
@@ -75,9 +77,11 @@ services:
       - wms-net
     volumes:
       - ./src/client/simulator.py:/app/simulator.py
+      - ./mosquitto/certs:/app/certs
     environment:
       - PYTHONUNBUFFERED=1
       - MQTT_HOST=iot_broker
+      - MQTT_PORT=8883
       - MQTT_USER=wms_device
       - MQTT_PASSWORD=device_secure_pass
     depends_on:
@@ -117,8 +121,10 @@ services:
       - wms-net
     ports:
       - "1883:1883"
+      - "8883:8883"
     volumes:
       - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/certs:/mosquitto/certs
     restart: always
 
   # --- Industrial Visualization Suite ---
