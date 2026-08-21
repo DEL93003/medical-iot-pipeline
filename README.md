@@ -39,3 +39,18 @@ Look closely at `gateway_server.py` and your stack configuration—these are the
 * **Internal Docker Subnet:** `wms-secure-net`
 * **API Gateway Port:** `8080 -> 5000`
 * **Ticketing Consumer Port:** `6000`
+
+---
+
+## 📊 Real-Time Fleet Telemetry & Visualization (Grafana)
+
+A production-style Grafana dashboard connected to TimescaleDB (PostgreSQL) provides real-time monitoring and visual alerting across the medical IoT fleet.
+
+### Dashboard Capabilities
+* **Fluid Volume Monitoring:** Live continuous time-series streaming of fluid levels per device.
+* **Vacuum Pressure Gauges:** Active horizontal bar gauges monitoring operational negative pressure thresholds (mmHg).
+* **Fleet Health & Active Status:** Tabular device overview tracking serials, zones, firmware versions, and last heartbeat timestamps.
+* **Filter Maintenance Alerts:** Dynamic status cards with automated visual alerting (`Good` vs. `Replacement Required`).
+
+### Configuration & Export
+* Exported dashboard schema is version-controlled under `grafana/dashboards/medical_iot_dashboard.json`.
