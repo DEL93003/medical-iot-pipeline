@@ -68,3 +68,28 @@ A production-style Grafana dashboard connected to TimescaleDB (PostgreSQL) provi
   * `wms_device`: Write-only access strictly bounded to `hospital/devices/+/telemetry` and `hospital/devices/+/alerts`.
   * `wms_gateway`: Read-only access across `hospital/devices/#` ingestion hierarchy.
   * Anonymous MQTT traffic is explicitly denied (`allow_anonymous false`).
+
+---
+
+## 🧪 Automated Integration Testing (CI / E2E)
+
+The repository includes end-to-end integration tests using `pytest` to validate the full message flow and cryptographic handshakes:
+
+* **Scope:** Simulates device telemetry over TLS 1.3 (Port 8883), validates ACL authorization, waits for ingestion worker processing, and asserts TimescaleDB record persistence.
+* **Execution:**
+  ```bash
+  source .venv/bin/activate
+  pytest -v tests/test_pipeline_e2e.py
+
+---
+
+## 🧪 Automated Integration Testing (CI / E2E)
+
+The repository includes end-to-end integration tests using `pytest` to validate the full message flow and cryptographic handshakes:
+
+* **Scope:** Simulates device telemetry over TLS 1.3 (Port 8883), validates ACL authorization, waits for ingestion worker processing, and asserts TimescaleDB record persistence.
+* **Execution:**
+  \`\`\`bash
+  source .venv/bin/activate
+  pytest -v tests/test_pipeline_e2e.py
+  \`\`\`

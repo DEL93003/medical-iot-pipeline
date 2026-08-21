@@ -14,3 +14,4 @@ ENV/
 data/
 *.log
 incident_tickets.txt
+.venv/
