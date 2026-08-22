@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS telemetry (
-    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     serial_number VARCHAR(64) NOT NULL,
     zone VARCHAR(64),
     firmware VARCHAR(32),
@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS telemetry (
     fluid_volume DOUBLE PRECISION
 );
 
-SELECT create_hypertable('telemetry', 'time', if_not_exists => TRUE);
+SELECT create_hypertable('telemetry', 'timestamp', if_not_exists => TRUE);

@@ -6,7 +6,6 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 import psycopg2
 
-# Configuration matching environment / CI defaults
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
 MQTT_USER = os.getenv("MQTT_USER", "device_user")
@@ -32,7 +31,7 @@ def test_mqtt_tls_publishing_and_db_ingestion():
         "fluid_volume": 2.75,
     }
 
-    # 1. Connect via MQTT with TLS and publish test telemetry
+    # 1. Connect via MQTT with TLS and publish
     client = mqtt.Client(
         CallbackAPIVersion.VERSION2, client_id=f"pytest_{test_serial}"
     )
@@ -45,7 +44,7 @@ def test_mqtt_tls_publishing_and_db_ingestion():
     client.publish(topic, json.dumps(test_payload))
     client.disconnect()
 
-    # 2. Poll TimescaleDB to allow consumer ingestion (up to 10s)
+    # 2. Poll TimescaleDB for ingestion record (up to 10 seconds)
     conn = psycopg2.connect(
         host=PG_HOST,
         port=PG_PORT,
@@ -70,7 +69,7 @@ def test_mqtt_tls_publishing_and_db_ingestion():
     cursor.close()
     conn.close()
 
-    # 3. Assertions
+    # 3. Verify record assertions
     assert (
         row is not None
     ), f"Telemetry record for {test_serial} was not ingested into TimescaleDB within 10s"
