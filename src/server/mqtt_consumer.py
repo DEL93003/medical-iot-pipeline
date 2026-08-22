@@ -23,12 +23,14 @@ ALERT_COOLDOWN_SECONDS = 60
 recent_alerts = {}
 mqtt_client_instance = None
 
+
 def get_secret(file_path, default=""):
     try:
         with open(file_path, "r") as f:
             return f.read().strip()
     except Exception:
         return default
+
 
 def get_db_connection():
     user = get_secret(PG_USER_FILE, "dale_admin")
@@ -48,10 +50,11 @@ def get_db_connection():
             logging.error(f"Database connection error: {e}. Retrying in 5s...")
             time.sleep(5)
 
+
 db_conn = get_db_connection()
 
+
 def record_alert(serial, zone, alert_type, metric_val, message, severity="WARNING"):
-    global db_conn
     try:
         cursor = db_conn.cursor()
         cursor.execute("""
@@ -63,9 +66,8 @@ def record_alert(serial, zone, alert_type, metric_val, message, severity="WARNIN
     except Exception as e:
         logging.error(f"Failed to persist alert to database: {e}")
 
+
 def trigger_remediation(serial, alert_type, reason):
-    """Publishes an automated control command to mitigate critical device states."""
-    global mqtt_client_instance
     if mqtt_client_instance is None:
         return
 
@@ -78,6 +80,7 @@ def trigger_remediation(serial, alert_type, reason):
     }
     mqtt_client_instance.publish(control_topic, json.dumps(command_payload), qos=1)
     logging.warning(f"🛡️ [AUTO-REMEDIATION] Dispatched FORCE_STANDBY command to {control_topic}")
+
 
 def check_and_alert_anomalies(payload):
     serial = payload.get("serial_number", "UNKNOWN")
@@ -123,9 +126,9 @@ def check_and_alert_anomalies(payload):
             logging.warning(f"🚨 [{severity}] [{serial} - {zone}] {alert_type}: {msg}")
             record_alert(serial, zone, alert_type, metric_val, msg, severity)
 
-            # Auto-remediate on CRITICAL overpressure
             if severity == "CRITICAL":
                 trigger_remediation(serial, alert_type, msg)
+
 
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
@@ -134,16 +137,16 @@ def on_connect(client, userdata, flags, rc, properties=None):
     else:
         logging.error(f"Failed to connect to MQTT broker, return code {rc}")
 
+
 def on_message(client, userdata, msg):
     global db_conn
     try:
-        # Ignore control messages to avoid feedback loops
         if msg.topic.endswith("/control"):
             return
 
         payload = json.loads(msg.payload.decode("utf-8"))
         cursor = db_conn.cursor()
-        
+
         insert_query = """
         INSERT INTO telemetry (timestamp, serial_number, zone, firmware, motor_state, filter_status, vacuum_pressure, fluid_volume)
         VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s);
@@ -168,6 +171,7 @@ def on_message(client, userdata, msg):
         if db_conn.closed:
             db_conn = get_db_connection()
 
+
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqtt_client_instance = client
 client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
@@ -179,5 +183,6 @@ if os.path.exists(CA_CERT_PATH):
 client.on_connect = on_connect
 client.on_message = on_message
 
-client.connect(MQTT_HOST, MQTT_PORT, 60)
-client.loop_forever()
+if __name__ == "__main__":
+    client.connect(MQTT_HOST, MQTT_PORT, 60)
+    client.loop_forever()
