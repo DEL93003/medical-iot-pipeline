@@ -1,0 +1,7 @@
+# Gateway Server Permissions
+user wms_gateway
+topic read telemetry/devices
+
+# Simulator Device Permissions
+user wms_device
+topic write telemetry/devices
