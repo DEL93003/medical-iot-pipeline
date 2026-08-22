@@ -25,16 +25,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest pytest-cov
+          pip install flake8 pytest pytest-cov gunicorn
 
       - name: Code Quality & Linting
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
-      - name: Provision CI Secrets & Writable Directories
+      - name: Provision CI Secrets & Directory Permissions
         run: |
           mkdir -p .docker_secrets logs templates
           chmod -R 777 logs
+          if [ -d "mosquitto" ]; then chmod -R 777 mosquitto; fi
           echo "postgres" > .docker_secrets/pg_user.txt
           echo "password" > .docker_secrets/pg_password.txt
           echo "ci_jwt_test_secret_key_32bytes_long" > .docker_secrets/jwt_secret.txt
@@ -43,14 +44,14 @@ jobs:
         run: |
           docker compose up -d --build
 
-      - name: Wait for Gateway & Database Health
+      - name: Wait for Stack Readiness
         run: |
           for i in {1..30}; do
             if docker compose ps gateway_server | grep -q "(healthy)"; then
-              echo "Gateway server is healthy and accepting traffic!"
+              echo "Stack is healthy and ready for testing!"
               break
             fi
-            echo "Waiting for gateway_server to finish startup..."
+            echo "Waiting for stack startup..."
             sleep 2
           done
 
@@ -59,10 +60,12 @@ jobs:
         run: |
           echo "=== Gateway Logs ==="
           docker compose logs gateway_server
-          echo "=== Database Logs ==="
-          docker compose logs iot_database
+          echo "=== Broker Logs ==="
+          docker compose logs iot_broker
           echo "=== Consumer Logs ==="
           docker compose logs mqtt_consumer
+          echo "=== Database Logs ==="
+          docker compose logs iot_database
           echo "=== Container Status ==="
           docker compose ps -a
 
