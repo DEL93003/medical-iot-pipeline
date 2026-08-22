@@ -3,7 +3,7 @@ services:
   gateway_server:
     build: .
     image: medical-iot-pipeline-gateway_server:v3-hardened
-    command: sh -c "pip install psycopg2-binary requests gevent pyjwt && gunicorn --workers 2 --threads 2 --bind 0.0.0.0:5000 src.server.gateway_server:app"
+    command: sh -c "pip install gunicorn psycopg2-binary requests gevent pyjwt && gunicorn --workers 2 --threads 2 --bind 0.0.0.0:5000 src.server.gateway_server:app"
     container_name: gateway_server
     networks:
       wms-net:
