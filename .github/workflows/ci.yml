@@ -7,29 +7,9 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
-    name: Lint & Unit Tests
+  test-and-build:
+    name: Lint, Test & Validate Stack
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: timescale/timescaledb:latest-pg15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: iot_telemetry
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      mosquitto:
-        image: eclipse-mosquitto:2
-        ports:
-          - 1883:1883
 
     steps:
       - name: Checkout Code
@@ -49,29 +29,24 @@ jobs:
 
       - name: Code Quality & Linting
         run: |
-          # Stop build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
-      - name: Run Test Suite
+      - name: Start Full Docker Compose Stack
+        run: |
+          docker compose up -d
+          # Give services a few seconds to initialize
+          sleep 10
+
+      - name: Run E2E Test Suite
         env:
           DB_HOST: localhost
           DB_PORT: 5432
-          DB_USER: postgres
-          DB_PASS: password
-          DB_NAME: iot_telemetry
-          MQTT_BROKER: localhost
-          MQTT_PORT: 1883
+          MQTT_HOST: localhost
+          MQTT_PORT: 8883
         run: |
           pytest -v tests/
 
-  docker-build:
-    name: Validate Container Builds
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Verify Docker Compose Config & Build
+      - name: Tear Down Stack
+        if: always()
         run: |
-          docker compose config
-          docker compose build
+          docker compose down -v
