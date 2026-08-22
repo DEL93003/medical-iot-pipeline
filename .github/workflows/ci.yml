@@ -31,11 +31,18 @@ jobs:
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
-      - name: Start Full Docker Compose Stack
+      - name: Build and Start Docker Compose Stack
         run: |
-          docker compose up -d
-          # Give services a few seconds to initialize
-          sleep 10
+          docker compose up -d --build
+          # Wait up to 30s for the database to become healthy
+          for i in {1..30}; do
+            if docker compose ps | grep -q "(healthy)"; then
+              echo "Containers are healthy!"
+              break
+            fi
+            echo "Waiting for services to initialize..."
+            sleep 2
+          done
 
       - name: Run E2E Test Suite
         env:
