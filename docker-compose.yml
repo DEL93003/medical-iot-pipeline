@@ -39,6 +39,7 @@ services:
 
   # --- Dedicated High-Performance Ingestion Engine ---
   mqtt_consumer:
+    build: .
     image: medical-iot-pipeline-gateway_server:v3-hardened
     container_name: mqtt_consumer
     command: sh -c "pip install psycopg2-binary paho-mqtt && python src/server/mqtt_consumer.py"
@@ -70,6 +71,7 @@ services:
 
   # --- Automated Fleet Data Simulator ---
   wms_fleet_simulator:
+    build: .
     image: medical-iot-pipeline-fleet_simulator
     container_name: wms_fleet_simulator
     command: sh -c "pip install paho-mqtt && python simulator.py"
