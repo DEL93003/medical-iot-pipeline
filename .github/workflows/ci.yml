@@ -31,14 +31,12 @@ jobs:
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
-      - name: Generate CI Dummy Docker Secrets
+      - name: Provision CI Secrets
         run: |
           mkdir -p .docker_secrets
           echo "postgres" > .docker_secrets/pg_user.txt
           echo "password" > .docker_secrets/pg_password.txt
-          # Fallbacks in case other secret files are defined
-          touch .docker_secrets/secret_key.txt
-          touch .docker_secrets/mqtt_password.txt
+          echo "ci_jwt_test_secret_key_32bytes_long" > .docker_secrets/jwt_secret.txt
 
       - name: Build and Start Docker Compose Stack
         run: |
@@ -46,10 +44,10 @@ jobs:
           # Wait up to 30s for database readiness
           for i in {1..30}; do
             if docker compose ps | grep -q "(healthy)"; then
-              echo "Database is ready!"
+              echo "Services are online and healthy!"
               break
             fi
-            echo "Waiting for services to initialize..."
+            echo "Waiting for stack initialization..."
             sleep 2
           done
 
