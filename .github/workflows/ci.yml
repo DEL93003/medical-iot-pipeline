@@ -31,9 +31,10 @@ jobs:
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
-      - name: Provision CI Secrets
+      - name: Provision CI Secrets & Writable Directories
         run: |
-          mkdir -p .docker_secrets
+          mkdir -p .docker_secrets logs templates
+          chmod -R 777 logs
           echo "postgres" > .docker_secrets/pg_user.txt
           echo "password" > .docker_secrets/pg_password.txt
           echo "ci_jwt_test_secret_key_32bytes_long" > .docker_secrets/jwt_secret.txt
@@ -41,15 +42,29 @@ jobs:
       - name: Build and Start Docker Compose Stack
         run: |
           docker compose up -d --build
-          # Wait up to 30s for database readiness
+
+      - name: Wait for Gateway & Database Health
+        run: |
           for i in {1..30}; do
-            if docker compose ps | grep -q "(healthy)"; then
-              echo "Services are online and healthy!"
+            if docker compose ps gateway_server | grep -q "(healthy)"; then
+              echo "Gateway server is healthy and accepting traffic!"
               break
             fi
-            echo "Waiting for stack initialization..."
+            echo "Waiting for gateway_server to finish startup..."
             sleep 2
           done
+
+      - name: Output Container Logs on Failure
+        if: failure()
+        run: |
+          echo "=== Gateway Logs ==="
+          docker compose logs gateway_server
+          echo "=== Database Logs ==="
+          docker compose logs iot_database
+          echo "=== Consumer Logs ==="
+          docker compose logs mqtt_consumer
+          echo "=== Container Status ==="
+          docker compose ps -a
 
       - name: Run E2E Test Suite
         env:
