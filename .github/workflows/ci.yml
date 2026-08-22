@@ -31,13 +31,22 @@ jobs:
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
 
+      - name: Generate CI Dummy Docker Secrets
+        run: |
+          mkdir -p .docker_secrets
+          echo "postgres" > .docker_secrets/pg_user.txt
+          echo "password" > .docker_secrets/pg_password.txt
+          # Fallbacks in case other secret files are defined
+          touch .docker_secrets/secret_key.txt
+          touch .docker_secrets/mqtt_password.txt
+
       - name: Build and Start Docker Compose Stack
         run: |
           docker compose up -d --build
-          # Wait up to 30s for the database to become healthy
+          # Wait up to 30s for database readiness
           for i in {1..30}; do
             if docker compose ps | grep -q "(healthy)"; then
-              echo "Containers are healthy!"
+              echo "Database is ready!"
               break
             fi
             echo "Waiting for services to initialize..."
