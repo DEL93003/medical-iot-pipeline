@@ -6,10 +6,11 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 import psycopg2
 
+# Match Mosquitto ACL & passwordfile credentials
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
-MQTT_USER = os.getenv("MQTT_USER", "device_user")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "device_password")
+MQTT_USER = os.getenv("MQTT_USER", "wms_device")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "device_secure_pass")
 CA_CERT_PATH = os.getenv("CA_CERT_PATH", "mosquitto/certs/ca.crt")
 
 PG_HOST = os.getenv("DB_HOST", "localhost")
@@ -31,7 +32,7 @@ def test_mqtt_tls_publishing_and_db_ingestion():
         "fluid_volume": 2.75,
     }
 
-    # 1. Connect via MQTT with TLS and publish
+    # 1. Connect via MQTT with TLS using wms_device role
     client = mqtt.Client(
         CallbackAPIVersion.VERSION2, client_id=f"pytest_{test_serial}"
     )
@@ -41,10 +42,11 @@ def test_mqtt_tls_publishing_and_db_ingestion():
 
     client.connect(MQTT_HOST, MQTT_PORT, 10)
     topic = f"hospital/devices/{test_serial}/telemetry"
-    client.publish(topic, json.dumps(test_payload))
+    msg_info = client.publish(topic, json.dumps(test_payload), qos=1)
+    msg_info.wait_for_publish(timeout=5)
     client.disconnect()
 
-    # 2. Poll TimescaleDB for ingestion record (up to 10 seconds)
+    # 2. Poll TimescaleDB to allow async consumer batch ingestion (up to 10s)
     conn = psycopg2.connect(
         host=PG_HOST,
         port=PG_PORT,
@@ -69,7 +71,7 @@ def test_mqtt_tls_publishing_and_db_ingestion():
     cursor.close()
     conn.close()
 
-    # 3. Verify record assertions
+    # 3. Assertions
     assert (
         row is not None
     ), f"Telemetry record for {test_serial} was not ingested into TimescaleDB within 10s"
