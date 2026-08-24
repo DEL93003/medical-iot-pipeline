@@ -76,7 +76,7 @@ jobs:
 
       - name: Run Integration & E2E Test Suite
         run: |
-          docker compose exec -T -e PYTHONPATH=/app telemetry_api pytest tests/ -v
+          docker compose exec -T telemetry_api pytest tests/ -v -p no:cov
 
       - name: Output Container Logs on Failure
         if: failure()
