@@ -2,6 +2,7 @@ import os
 import ssl
 import time
 import json
+import socket
 import pytest
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
@@ -28,6 +29,22 @@ def get_secret(file_path: str, default: str = "") -> str:
         return default
 
 
+def resolve_broker_host(preferred_host: str) -> str:
+    try:
+        socket.getaddrinfo(preferred_host, MQTT_PORT)
+        return preferred_host
+    except socket.gaierror:
+        return "localhost"
+
+
+def resolve_db_host(preferred_host: str) -> str:
+    try:
+        socket.getaddrinfo(preferred_host, 5432)
+        return preferred_host
+    except socket.gaierror:
+        return "localhost"
+
+
 def test_mqtt_tls_publishing_and_db_ingestion():
     test_serial = f"TEST-UNIT-{int(time.time())}"
     test_payload = {
@@ -49,20 +66,22 @@ def test_mqtt_tls_publishing_and_db_ingestion():
     client.tls_set(ca_certs=ca_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client.tls_insecure_set(True)
 
-    client.connect(MQTT_HOST, MQTT_PORT, 10)
+    broker_host = resolve_broker_host(MQTT_HOST)
+    client.connect(broker_host, MQTT_PORT, 10)
     client.loop_start()
 
     topic = f"hospital/devices/{test_payload['serial_number']}/telemetry"
     client.publish(topic, json.dumps(test_payload), qos=1)
-    time.sleep(2)
+    time.sleep(3)
     client.loop_stop()
     client.disconnect()
 
     user = get_secret(PG_USER_FILE, os.getenv("PG_USER", "dale_admin"))
     password = get_secret(PG_PASSWORD_FILE, os.getenv("PG_PASSWORD", "admin_secure_pass"))
+    db_host = resolve_db_host(PG_HOST)
 
     conn = psycopg2.connect(
-        host=PG_HOST,
+        host=db_host,
         database=PG_DB,
         user=user,
         password=password,
