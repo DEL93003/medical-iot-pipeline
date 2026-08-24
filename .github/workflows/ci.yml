@@ -1,82 +1,92 @@
-name: Medical IoT Pipeline CI
+name: Medical IoT Fleet CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
 
 jobs:
-  test-and-build:
-    name: Lint, Test & Validate Stack
+  build-test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: "pip"
 
-      - name: Install Dependencies
+      - name: Install Linting Tools
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest pytest-cov gunicorn
+          pip install flake8
 
       - name: Code Quality & Linting
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,__pycache__
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Provision CI Secrets & Directory Permissions
+      - name: Provision Secrets & TLS Certificates
         run: |
-          mkdir -p .docker_secrets logs templates
-          chmod -R 777 logs
-          if [ -d "mosquitto" ]; then chmod -R 777 mosquitto; fi
-          echo "postgres" > .docker_secrets/pg_user.txt
-          echo "password" > .docker_secrets/pg_password.txt
-          echo "ci_jwt_test_secret_key_32bytes_long" > .docker_secrets/jwt_secret.txt
+          mkdir -p certs .docker_secrets
+          openssl req -new -x509 -days 365 -nodes -out certs/ca.crt -keyout certs/ca.key -subj "/CN=Medical-IoT-CA"
+          openssl req -new -nodes -out certs/server.csr -keyout certs/server.key -subj "/CN=iot_broker"
+          openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/server.crt -days 365
+          chmod 644 certs/*
+          printf "dale_admin" > .docker_secrets/postgres_user.txt
+          printf "admin_secure_pass" > .docker_secrets/postgres_password.txt
+          chmod 600 .docker_secrets/*
 
-      - name: Build and Start Docker Compose Stack
+      - name: Build and Start Pipeline Stack
         run: |
           docker compose up -d --build
 
       - name: Wait for Stack Readiness
         run: |
           for i in {1..30}; do
-            if docker compose ps gateway_server | grep -q "(healthy)"; then
-              echo "Stack is healthy and ready for testing!"
+            if docker compose exec -T iot_database pg_isready -U dale_admin -d iot_telemetry; then
+              echo "Database is healthy and ready."
               break
             fi
-            echo "Waiting for stack startup..."
+            echo "Waiting for database to initialize..."
             sleep 2
           done
+          sleep 5
+
+      - name: Initialize Database Schema
+        run: |
+          docker compose exec -T iot_database psql -U dale_admin -d iot_telemetry -c "
+          CREATE TABLE IF NOT EXISTS telemetry (
+              timestamp TIMESTAMPTZ NOT NULL,
+              serial_number TEXT NOT NULL,
+              zone TEXT,
+              firmware TEXT,
+              motor_state TEXT,
+              filter_status TEXT,
+              vacuum_pressure DOUBLE PRECISION,
+              fluid_volume DOUBLE PRECISION,
+              PRIMARY KEY (timestamp, serial_number)
+          );
+          SELECT create_hypertable('telemetry', 'timestamp', migrate_data => true, if_not_exists => true);
+          "
+
+      - name: Run Integration & E2E Test Suite
+        run: |
+          docker compose exec -T -e PYTHONPATH=/app telemetry_api pytest tests/ -v
 
       - name: Output Container Logs on Failure
         if: failure()
         run: |
-          echo "=== Gateway Logs ==="
-          docker compose logs gateway_server
+          echo "=== MQTT Consumer Logs ==="
+          docker compose logs mqtt_consumer
+          echo "=== API Logs ==="
+          docker compose logs telemetry_api
           echo "=== Broker Logs ==="
           docker compose logs iot_broker
-          echo "=== Consumer Logs ==="
-          docker compose logs mqtt_consumer
-          echo "=== Database Logs ==="
-          docker compose logs iot_database
-          echo "=== Container Status ==="
-          docker compose ps -a
-
-      - name: Run E2E Test Suite
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          MQTT_HOST: localhost
-          MQTT_PORT: 8883
-        run: |
-          pytest -v tests/
 
       - name: Tear Down Stack
         if: always()
