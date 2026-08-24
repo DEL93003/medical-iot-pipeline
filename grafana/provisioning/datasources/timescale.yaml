@@ -3,14 +3,18 @@ apiVersion: 1
 datasources:
   - name: TimescaleDB
     type: postgres
+    uid: TimescaleDB
     access: proxy
+    orgId: 1
     url: iot_database:5432
-    database: iot_telemetry
     user: dale_admin
+    database: iot_telemetry
     secureJsonData:
       password: admin_secure_pass
     jsonData:
-      sslmode: 'disable'
+      database: iot_telemetry
+      defaultDatabase: iot_telemetry
+      sslmode: disable
       postgresVersion: 1600
       timescaledb: true
     isDefault: true

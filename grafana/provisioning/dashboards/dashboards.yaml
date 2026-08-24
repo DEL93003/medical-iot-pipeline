@@ -1,12 +1,12 @@
 apiVersion: 1
 
 providers:
-  - name: 'Medical IoT Dashboards'
+  - name: 'Hospital Telemetry'
     orgId: 1
-    folder: 'Fleet Telemetry'
+    folder: 'Hospital Telemetry'
     type: file
     disableDeletion: false
-    editable: true
+    updateIntervalSeconds: 10
     allowUiUpdates: true
     options:
       path: /etc/grafana/provisioning/dashboards
