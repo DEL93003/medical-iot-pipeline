@@ -41,8 +41,24 @@ jobs:
           printf "admin_secure_pass" > .docker_secrets/postgres_password.txt
           chmod 600 .docker_secrets/*
 
-      - name: Generate Mosquitto Auth
+      - name: Generate Mosquitto Auth & Config
         run: |
+          cat << 'CONF' > mosquitto/config/mosquitto.conf
+          per_listener_settings false
+
+          listener 1883
+          allow_anonymous true
+
+          listener 8883
+          cafile /mosquitto/certs/ca.crt
+          certfile /mosquitto/certs/server.crt
+          keyfile /mosquitto/certs/server.key
+          require_certificate false
+
+          password_file /mosquitto/config/password_file
+          acl_file /mosquitto/config/aclfile
+          CONF
+
           cat << 'ACL' > mosquitto/config/aclfile
           user wms_device
           topic write hospital/devices/+/telemetry
@@ -51,6 +67,7 @@ jobs:
           user wms_gateway
           topic readwrite hospital/devices/#
           ACL
+
           docker run --rm -v "$(pwd)/mosquitto/config:/config" eclipse-mosquitto:2.0 sh -c "
           mosquitto_passwd -c -b /config/password_file wms_device device_secure_pass && \
           mosquitto_passwd -b /config/password_file wms_gateway gateway_secure_pass
@@ -61,7 +78,7 @@ jobs:
         run: |
           docker compose up -d iot_database iot_broker
 
-      - name: Wait for Database Readiness
+      - name: Wait for Database and Broker Readiness
         run: |
           for i in {1..30}; do
             if docker compose exec -T iot_database pg_isready -U dale_admin -d iot_telemetry; then
@@ -70,6 +87,15 @@ jobs:
             fi
             echo "Waiting for database to initialize..."
             sleep 2
+          done
+
+          echo "Waiting for Mosquitto TLS broker on port 8883..."
+          for i in {1..30}; do
+            if nc -z localhost 8883 2>/dev/null || docker compose exec -T iot_broker nc -z localhost 8883 2>/dev/null; then
+              echo "Mosquitto broker is accepting TLS connections."
+              break
+            fi
+            sleep 1
           done
 
       - name: Initialize Database Schema
