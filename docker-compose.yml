@@ -1,85 +1,118 @@
 services:
-  # --- Central Flask Backend Brain ---
-  gateway_server:
-    build: .
-    image: medical-iot-pipeline-gateway_server:v3-hardened
-    command: sh -c "pip install gunicorn psycopg2-binary requests gevent pyjwt && gunicorn --workers 2 --threads 2 --bind 0.0.0.0:5000 src.server.gateway_server:app"
-    container_name: gateway_server
-    networks:
-      wms-net:
-        aliases:
-          - wms_gateway_server
+  # --- Mosquitto MQTT Broker ---
+  iot_broker:
+    image: eclipse-mosquitto:2.0
+    container_name: iot_broker
+    ports:
+      - "1883:1883"
+      - "8883:8883"
     volumes:
-      - telemetry_data:/app/data
-      - ./src:/app/src
-      - ./logs:/app/logs
-      - ./templates/dashboard.html:/app/templates/dashboard.html
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./certs:/mosquitto/certs:ro
+    networks:
+      - wms-net
+    restart: always
+
+  # --- TimescaleDB Hypertable Database ---
+  iot_database:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_database
+    environment:
+      - POSTGRES_DB=iot_telemetry
+      - POSTGRES_USER_FILE=/run/secrets/pg_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/pg_password
     secrets:
       - pg_user
       - pg_password
-      - jwt_secret
-    environment:
-      - DATABASE_PATH=/app/data/telemetry.db
-      - FLASK_ENV=production
-      - PG_HOST=iot_database
-      - PG_DB=iot_telemetry
-      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
     ports:
-      - "8080:5000"
-    restart: always
-    depends_on:
-      iot_database:
-        condition: service_healthy
+      - "5432:5432"
+    networks:
+      - wms-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 5000))"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U dale_admin -d iot_telemetry"]
+      interval: 5s
       timeout: 5s
-      retries: 3
-      start_period: 45s
+      retries: 5
+    restart: always
 
-  # --- Dedicated High-Performance Ingestion Engine ---
+  # --- Telemetry Ingestion Consumer ---
   mqtt_consumer:
     build: .
-    image: medical-iot-pipeline-gateway_server:v3-hardened
     container_name: mqtt_consumer
-    command: sh -c "pip install psycopg2-binary paho-mqtt && python src/server/mqtt_consumer.py"
+    command: python -u src/server/mqtt_consumer.py
     networks:
       - wms-net
     volumes:
       - ./src:/app/src
-      - ./logs:/app/logs
-      - ./mosquitto/certs:/app/certs
+      - ./certs:/app/certs:ro
     secrets:
       - pg_user
       - pg_password
     environment:
       - PYTHONUNBUFFERED=1
-      - PG_HOST=iot_database
-      - PG_DB=iot_telemetry
       - MQTT_HOST=iot_broker
       - MQTT_PORT=8883
       - MQTT_USER=wms_gateway
       - MQTT_PASSWORD=gateway_secure_pass
+      - CA_CERT_PATH=/app/certs/ca.crt
+      - PG_HOST=iot_database
+      - PG_DB=iot_telemetry
       - PG_USER_FILE=/run/secrets/pg_user
       - PG_PASSWORD_FILE=/run/secrets/pg_password
-    restart: always
     depends_on:
       iot_broker:
         condition: service_started
       iot_database:
         condition: service_healthy
+    restart: always
 
-  # --- Automated Fleet Data Simulator ---
-  wms_fleet_simulator:
+  # --- REST Telemetry Microservice ---
+  telemetry_api:
     build: .
-    image: medical-iot-pipeline-fleet_simulator
-    container_name: wms_fleet_simulator
-    command: sh -c "pip install paho-mqtt && python simulator.py"
+    image: medical-iot-pipeline-api
+    container_name: telemetry_api
+    command: sh -c "pip install fastapi uvicorn psycopg2-binary pydantic httpx pytest && uvicorn src.api.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
     networks:
       - wms-net
     volumes:
-      - ./src/client/simulator.py:/app/simulator.py
-      - ./mosquitto/certs:/app/certs
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./certs:/app/certs:ro
+    secrets:
+      - pg_user
+      - pg_password
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MQTT_HOST=iot_broker
+      - MQTT_PORT=8883
+      - MQTT_USER=wms_device
+      - MQTT_PASSWORD=device_secure_pass
+      - CA_CERT_PATH=/app/certs/ca.crt
+      - PG_HOST=iot_database
+      - PG_DB=iot_telemetry
+      - PG_USER_FILE=/run/secrets/pg_user
+      - PG_PASSWORD_FILE=/run/secrets/pg_password
+    depends_on:
+      iot_database:
+        condition: service_healthy
+      iot_broker:
+        condition: service_started
+    restart: always
+
+  # --- Multi-Device Edge Simulator ---
+  wms_fleet_simulator:
+    build: .
+    container_name: wms_fleet_simulator
+    command: python -u src/client/simulator.py
+    networks:
+      - wms-net
+    volumes:
+      - ./src:/app/src
+      - ./certs:/app/certs:ro
     environment:
       - PYTHONUNBUFFERED=1
       - MQTT_HOST=iot_broker
@@ -88,102 +121,40 @@ services:
       - MQTT_PASSWORD=device_secure_pass
       - CA_CERT_PATH=/app/certs/ca.crt
     depends_on:
-      gateway_server:
-        condition: service_healthy
+      iot_broker:
+        condition: service_started
     restart: always
 
-  # --- Time-Series Persistent Storage ---
-  iot_database:
-    image: timescale/timescaledb:latest-pg15
-    container_name: iot_database
-    networks:
-      - wms-net
-    secrets:
-      - pg_user
-      - pg_password
-    environment:
-      - POSTGRES_USER_FILE=/run/secrets/pg_user
-      - POSTGRES_PASSWORD_FILE=/run/secrets/pg_password
-      - POSTGRES_DB=iot_telemetry
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dale_admin -d iot_telemetry"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # --- Open-Source MQTT Message Broker ---
-  iot_broker:
-    image: eclipse-mosquitto:2
-    container_name: iot_broker
-    networks:
-      - wms-net
-    ports:
-      - "1883:1883"
-      - "8883:8883"
-    volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/certs:/mosquitto/certs
-    restart: always
-
-  # --- Industrial Visualization Suite ---
+  # --- Grafana Dashboard Engine ---
   iot_grafana:
-    image: grafana/grafana-oss:latest
+    image: grafana/grafana:latest
     container_name: iot_grafana
     ports:
       - "3000:3000"
     networks:
       - wms-net
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_dashboard_pass
+      - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/dashboards/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-    restart: always
     depends_on:
       iot_database:
         condition: service_healthy
-
-  # --- Event-Driven Incident Management Handler ---
-  ticketing_service:
-    image: python:3.9-slim
-    container_name: ticketing_service
-    working_dir: /app
-    command: sh -c "pip install flask && flask run --host=0.0.0.0 --port=6000"
-    networks:
-      - wms-net
-    environment:
-      - FLASK_APP=tickets.py
-    volumes:
-      - ./tickets.py:/app/tickets.py
     restart: always
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 6000))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-secrets:
-  pg_user:
-    file: ./.docker_secrets/pg_user.txt
-  pg_password:
-    file: ./.docker_secrets/pg_password.txt
-  jwt_secret:
-    file: ./.docker_secrets/jwt_secret.txt
 
 networks:
   wms-net:
-    name: wms-secure-net
     driver: bridge
 
 volumes:
-  telemetry_data:
-    name: telemetry_data
-  postgres_data:
-    name: postgres_data
+  timescaledb_data:
   grafana_data:
-    name: grafana_data
+
+secrets:
+  pg_user:
+    file: .docker_secrets/postgres_user.txt
+  pg_password:
+    file: .docker_secrets/postgres_password.txt

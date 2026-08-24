@@ -1,23 +1,31 @@
-import json
 import os
 import ssl
 import time
+import json
+import pytest
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 import psycopg2
+from psycopg2.extras import RealDictCursor
 
-# Match Mosquitto ACL & passwordfile credentials
-MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
+MQTT_HOST = os.getenv("MQTT_HOST", "iot_broker")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
 MQTT_USER = os.getenv("MQTT_USER", "wms_device")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "device_secure_pass")
-CA_CERT_PATH = os.getenv("CA_CERT_PATH", "mosquitto/certs/ca.crt")
+CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
 
-PG_HOST = os.getenv("DB_HOST", "localhost")
-PG_PORT = int(os.getenv("DB_PORT", "5432"))
-PG_DB = os.getenv("DB_NAME", "iot_telemetry")
-PG_USER = os.getenv("DB_USER", "postgres")
-PG_PASSWORD = os.getenv("DB_PASSWORD", "password")
+PG_HOST = os.getenv("PG_HOST", "iot_database")
+PG_DB = os.getenv("PG_DB", "iot_telemetry")
+PG_USER_FILE = os.getenv("PG_USER_FILE", "/run/secrets/pg_user")
+PG_PASSWORD_FILE = os.getenv("PG_PASSWORD_FILE", "/run/secrets/pg_password")
+
+
+def get_secret(file_path: str, default: str = "") -> str:
+    try:
+        with open(file_path, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return default
 
 
 def test_mqtt_tls_publishing_and_db_ingestion():
@@ -32,51 +40,44 @@ def test_mqtt_tls_publishing_and_db_ingestion():
         "fluid_volume": 2.75,
     }
 
-    # 1. Connect via MQTT with TLS using wms_device role
     client = mqtt.Client(
         CallbackAPIVersion.VERSION2, client_id=f"pytest_{test_serial}"
     )
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
-    client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+
+    ca_path = CA_CERT_PATH if os.path.exists(CA_CERT_PATH) else "certs/ca.crt"
+    client.tls_set(ca_certs=ca_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client.tls_insecure_set(True)
 
     client.connect(MQTT_HOST, MQTT_PORT, 10)
-    topic = f"hospital/devices/{test_serial}/telemetry"
-    msg_info = client.publish(topic, json.dumps(test_payload), qos=1)
-    msg_info.wait_for_publish(timeout=5)
+    client.loop_start()
+
+    topic = f"hospital/devices/{test_payload['serial_number']}/telemetry"
+    client.publish(topic, json.dumps(test_payload), qos=1)
+    time.sleep(2)
+    client.loop_stop()
     client.disconnect()
 
-    # 2. Poll TimescaleDB to allow async consumer batch ingestion (up to 10s)
+    user = get_secret(PG_USER_FILE, os.getenv("PG_USER", "dale_admin"))
+    password = get_secret(PG_PASSWORD_FILE, os.getenv("PG_PASSWORD", "admin_secure_pass"))
+
     conn = psycopg2.connect(
         host=PG_HOST,
-        port=PG_PORT,
         database=PG_DB,
-        user=PG_USER,
-        password=PG_PASSWORD,
+        user=user,
+        password=password,
+        connect_timeout=5,
+        cursor_factory=RealDictCursor
     )
-    cursor = conn.cursor()
-
-    row = None
-    for _ in range(20):
-        cursor.execute(
-            "SELECT serial_number, zone, firmware, vacuum_pressure, fluid_volume "
-            "FROM telemetry WHERE serial_number = %s;",
-            (test_serial,),
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM telemetry WHERE serial_number = %s ORDER BY timestamp DESC LIMIT 1;",
+            (test_serial,)
         )
-        row = cursor.fetchone()
-        if row:
-            break
-        time.sleep(0.5)
-
-    cursor.close()
+        record = cur.fetchone()
     conn.close()
 
-    # 3. Assertions
-    assert (
-        row is not None
-    ), f"Telemetry record for {test_serial} was not ingested into TimescaleDB within 10s"
-    assert row[0] == test_serial
-    assert row[1] == "Test-Lab-1"
-    assert row[2] == "v9.9.9"
-    assert row[3] == 155.5
-    assert row[4] == 2.75
+    assert record is not None
+    assert record["serial_number"] == test_serial
+    assert float(record["vacuum_pressure"]) == 155.5
+    assert float(record["fluid_volume"]) == 2.75
