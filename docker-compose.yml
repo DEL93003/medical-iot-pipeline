@@ -86,6 +86,7 @@ services:
       - MQTT_PORT=8883
       - MQTT_USER=wms_device
       - MQTT_PASSWORD=device_secure_pass
+      - CA_CERT_PATH=/app/certs/ca.crt
     depends_on:
       gateway_server:
         condition: service_healthy
