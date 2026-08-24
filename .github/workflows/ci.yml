@@ -32,7 +32,7 @@ jobs:
 
       - name: Provision Secrets & TLS Certificates
         run: |
-          mkdir -p certs .docker_secrets
+          mkdir -p certs .docker_secrets mosquitto/config
           openssl req -new -x509 -days 365 -nodes -out certs/ca.crt -keyout certs/ca.key -subj "/CN=Medical-IoT-CA"
           openssl req -new -nodes -out certs/server.csr -keyout certs/server.key -subj "/CN=iot_broker"
           openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/server.crt -days 365
@@ -41,11 +41,27 @@ jobs:
           printf "admin_secure_pass" > .docker_secrets/postgres_password.txt
           chmod 600 .docker_secrets/*
 
-      - name: Build and Start Pipeline Stack
+      - name: Generate Mosquitto Auth
         run: |
-          docker compose up -d --build
+          cat << 'ACL' > mosquitto/config/aclfile
+          user wms_device
+          topic write hospital/devices/+/telemetry
+          topic read hospital/devices/+/control
 
-      - name: Wait for Stack Readiness
+          user wms_gateway
+          topic readwrite hospital/devices/#
+          ACL
+          docker run --rm -v "$(pwd)/mosquitto/config:/config" eclipse-mosquitto:2.0 sh -c "
+          mosquitto_passwd -c -b /config/password_file wms_device device_secure_pass && \
+          mosquitto_passwd -b /config/password_file wms_gateway gateway_secure_pass
+          "
+          chmod 644 mosquitto/config/*
+
+      - name: Start Database & Broker
+        run: |
+          docker compose up -d iot_database iot_broker
+
+      - name: Wait for Database Readiness
         run: |
           for i in {1..30}; do
             if docker compose exec -T iot_database pg_isready -U dale_admin -d iot_telemetry; then
@@ -55,7 +71,6 @@ jobs:
             echo "Waiting for database to initialize..."
             sleep 2
           done
-          sleep 5
 
       - name: Initialize Database Schema
         run: |
@@ -74,6 +89,22 @@ jobs:
           SELECT create_hypertable('telemetry', 'timestamp', migrate_data => true, if_not_exists => true);
           "
 
+      - name: Start Full Application Stack
+        run: |
+          docker compose up -d --build
+
+      - name: Wait for API Microservice
+        run: |
+          for i in {1..30}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "API is online and accepting traffic."
+              break
+            fi
+            echo "Waiting for API to start (Current HTTP code: $STATUS)..."
+            sleep 2
+          done
+
       - name: Run Integration & E2E Test Suite
         run: |
           docker compose exec -T telemetry_api pytest tests/ -v -p no:cov
@@ -81,10 +112,10 @@ jobs:
       - name: Output Container Logs on Failure
         if: failure()
         run: |
-          echo "=== MQTT Consumer Logs ==="
-          docker compose logs mqtt_consumer
           echo "=== API Logs ==="
           docker compose logs telemetry_api
+          echo "=== Consumer Logs ==="
+          docker compose logs mqtt_consumer
           echo "=== Broker Logs ==="
           docker compose logs iot_broker
 
