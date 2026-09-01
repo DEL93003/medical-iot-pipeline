@@ -61,7 +61,6 @@ def get_db_connection():
 
 
 def check_and_alert_anomalies(payload):
-    global mqtt_client_instance
     serial = payload.get("serial_number", "Unknown")
     zone = payload.get("zone", "General")
     vacuum = payload.get("vacuum_pressure", 0.0)
