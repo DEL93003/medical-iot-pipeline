@@ -1,95 +1,63 @@
-# 🏥 Medical IoT Telemetry Pipeline — Security & Vulnerability Assessment
+# Medical-IOT Telemetry & Auto-Remediation Pipeline
 
-This repository contains an edge-gateway architecture designed to ingest real-time surgical pump metrics via MQTT and HTTP, parse telemetry logs, and dispatch event-driven ticketing webhooks to downstream systems.
-
----
-
-## 🛡️ Audited & Patched Vulnerabilities
-
-### 1. [FIXED] Concurrency Blocking & Socket Starvation (C-Extension Lockup)
-* **Vulnerability:** The gateway server mixed traditional Python `threading` with standard `psycopg2` database bindings inside an open-ended EventSource stream loop (`/api/v1/dashboard/stream`). Under heavy traffic, raw C-extensions blocked the main thread execution, resulting in dropped MQTT frames and dashboard stuttering.
-* **Remediation:** Injected asynchronous runtime engines (`gevent` monkey-patching) and replaced raw single-session handles with a thread-safe connection pooling driver (`psycogreen` + `ThreadedConnectionPool`).
-
-### 2. [FIXED] Rigid Internal Routing & Container Isolation
-* **Vulnerability:** The event-driven alert dispatcher was hardcoded to hit `127.0.0.1:6000`, causing continuous `Connection refused` loop crashes inside the isolated gateway container context.
-* **Remediation:** Migrated routing to an environment-driven service hostname lookup (`ticketing_service`) and linked the microservice layer explicitly inside the `wms-secure-net` virtual bridge subnet.
+A secure, containerized, and automated telemetry pipeline designed for clinical suction and fluid waste management systems (WMS). Built to handle real-time edge telemetry, TLS-encrypted MQTT messaging, TimescaleDB metric ingestion, automated IT incident ticketing, closed-loop safety remediation, and interactive Grafana observability.
 
 ---
 
-## 🚨 Active High-Priority Security Gaps (Vulnerability Checklist)
+## Architecture Overview
 
-Look closely at `gateway_server.py` and your stack configuration—these are the critical items remaining to be hardened:
-
-### 🟩 1. Broken Authentication (JWT Validation Bypass)
-* **The Gap:** Inside `gateway_server.py`, the `@token_required` decorator middleware completely bypasses cryptographic checking. It contains a stub that automatically injects `request.token_user = "dale_admin"` into the thread context without reading, decoding, or verifying an incoming HTTP `Authorization: Bearer <token>` header.
-* **Risk:** High. Any unauthenticated script can issue hard-override API requests to clear operational logs or alter configurations.
-
-### 🟩 2. Hardcoded Administrative Secrets & Environment Defaults
-* **The Gap:** The `JWT_SECRET_KEY` falls back to a hardcoded plaintext string (`'super-secure-medical-iot-token-key'`). Additionally, the PostgreSQL database credentials (`dale_admin`, `secure_telemetry_pass`) are exposed in cleartext defaults within `get_db_connection()` blocks.
-* **Risk:** Medium-High. Attackers scraping source control configurations immediately inherit root database privileges and token-signing authorization capabilities.
-
-### 🟩 3. Unencrypted Internal Traffic (Cleartext Network Strings)
-* **The Gap:** Telemetry frames and webhook alert tickets transit across local routing lines via unencrypted HTTP and plain text MQTT (Port 1883). 
-* **Risk:** Medium. Lacks mutual TLS (mTLS) enforcement. If rogue endpoints manage to link onto the broader local area network, they can intercept sensitive metrics or spoof critical telemetry alerts.
+<!-- Architecture Diagram -->
+* Edge Simulator -> Eclipse Mosquitto (TLS 8883) -> MQTTconsumer + FastAPI
+* Metrics -> TimescaleDB, Alerts -> Ticketing Webhook, Dashboards -> Grafana
 
 ---
 
-## 🛠️ Infrastructure Configuration Summary
-* **Local Server IP:** `192.168.0.10` (Bridged Network Adapter Mode)
-* **Internal Docker Subnet:** `wms-secure-net`
-* **API Gateway Port:** `8080 -> 5000`
-* **Ticketing Consumer Port:** `6000`
+## Features
+
+- **TLS-Encrypted MQTT Broker**: Eclipse Mosquitto with TLS 8883, ACL policies (`wms_device`, `wms_gateway`).
+- **High-Performance Time-Series Storage**: PostgreSQL 16 with TimescaleDB hypertables.
+- **Closed-Loop Safety Failsafe**: Automatic MQTT `STANDBY` commands when fluid >= 3.8L.
+- **Automated Incident Ticketing**: Webhook dispatching tickets to `incident_tickets.txt` for fluid, filter, and vacuum anomalies.
+- **RESTful Device Control API**: FastAPI endpoints for real-time status, diagnostics, and manual resets.
+- **Full CI/CD Quality Gate**: GitHub Actions pipeline with Flake8 and pytest E2E tests.
 
 ---
 
-## 📊 Real-Time Fleet Telemetry & Visualization (Grafana)
+## Microservices Breakdown
 
-A production-style Grafana dashboard connected to TimescaleDB (PostgreSQL) provides real-time monitoring and visual alerting across the medical IoT fleet.
-
-### Dashboard Capabilities
-* **Fluid Volume Monitoring:** Live continuous time-series streaming of fluid levels per device.
-* **Vacuum Pressure Gauges:** Active horizontal bar gauges monitoring operational negative pressure thresholds (mmHg).
-* **Fleet Health & Active Status:** Tabular device overview tracking serials, zones, firmware versions, and last heartbeat timestamps.
-* **Filter Maintenance Alerts:** Dynamic status cards with automated visual alerting (`Good` vs. `Replacement Required`).
-
-### Configuration & Export
-* Exported dashboard schema is version-controlled under `grafana/dashboards/medical_iot_dashboard.json`.
-
-### Automated Dashboard Provisioning (IaC)
-* **Provisioning Provider:** `grafana/provisioning/dashboards/dashboards.yaml`
-* Dashboards located in `grafana/dashboards/` are mounted and loaded into the `Fleet Telemetry` folder on container startup.
+| Service Name | Port | Description |
+| :--- | :--- | :--- |
+| `iot_broker` | 1883, 8883 | Eclipse Mosquitto broker (TLS & plaintext) |
+| `iot_database` | 5432 | TimescaleDB / PostgreSQL database |
+| `mqtt_consumer` | -- | Ingestion worker, anomaly detector, and failsafe engine |
+| `wms_fleet_simulator` | -- | Multi-device clinical telemetry simulator |
+| `telemetry_api` | 8000 | FastAPI REST microservice |
+| `ticketing_service` | 6000 | Incident webhook receiver logger |
+| `iot_grafana` | 3000 | Live observability dashboard |
 
 ---
 
-## 🔒 Implemented Security Hardening: MQTT Topic ACLs & Authentication
+## Quick Start & Run Commands
 
-* **RBAC & Authentication:** Enforced username/password authentication using salted SHA-512 hashes via `passwordfile`.
-* **Least-Privilege Topic Access Control (ACLs):**
-  * `wms_device`: Write-only access strictly bounded to `hospital/devices/+/telemetry` and `hospital/devices/+/alerts`.
-  * `wms_gateway`: Read-only access across `hospital/devices/#` ingestion hierarchy.
-  * Anonymous MQTT traffic is explicitly denied (`allow_anonymous false`).
+### 1. Start the Application Stack
+```bash
+docker compose up -d --build
+psycopg2
+```
 
----
-
-## 🧪 Automated Integration Testing (CI / E2E)
-
-The repository includes end-to-end integration tests using `pytest` to validate the full message flow and cryptographic handshakes:
-
-* **Scope:** Simulates device telemetry over TLS 1.3 (Port 8883), validates ACL authorization, waits for ingestion worker processing, and asserts TimescaleDB record persistence.
-* **Execution:**
-  ```bash
-  source .venv/bin/activate
-  pytest -v tests/test_pipeline_e2e.py
+### 2. Run Tests & Linting
+```bash
+docker compose exec telemetry_api pytest tests/ -v
+docker compose exec telemetry_api flake8 src tests
+```
 
 ---
 
-## 🧪 Automated Integration Testing (CI / E2E)
+## REST API Endpoints
 
-The repository includes end-to-end integration tests using `pytest` to validate the full message flow and cryptographic handshakes:
+**Base URL**: `http://localhost:8000`
 
-* **Scope:** Simulates device telemetry over TLS 1.3 (Port 8883), validates ACL authorization, waits for ingestion worker processing, and asserts TimescaleDB record persistence.
-* **Execution:**
-  \`\`\`bash
-  source .venv/bin/activate
-  pytest -v tests/test_pipeline_e2e.py
-  \`\`\`
+*`GET /api/v1/health`: System & database health check
+*`GET /api/v1/devices`: Fetch latest fleet status
+*`POST /api/v1/devices/{serial_number}/reset`: Manual operator device reset
+*`POST /api/v1/devicer/{serial_number}/control`: Dispatch arbitrary MATT control commands
