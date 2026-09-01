@@ -1,36 +1,33 @@
-import os
 import json
-import ssl
 import logging
+import os
+import ssl
+import sys
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import paho.mqtt.client as mqtt
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import paho.mqtt.client as mqtt
-from fastapi import FastAPI, HTTPException, Query, status
-from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-app = FastAPI(
-    title="Medical IoT Fleet Telemetry API",
-    description="REST microservice providing fleet health, rollups, device filtering, and bidirectional control.",
-    version="1.2.1"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# Database Configurations
+app = FastAPI(title="Medical-IoT Telemetry API", version="1.0.0")
+
 PG_HOST = os.getenv("PG_HOST", "iot_database")
 PG_DB = os.getenv("PG_DB", "iot_telemetry")
 PG_USER_FILE = os.getenv("PG_USER_FILE", "/run/secrets/pg_user")
 PG_PASSWORD_FILE = os.getenv("PG_PASSWORD_FILE", "/run/secrets/pg_password")
 
-# MQTT Broker Configurations
-MQTT_HOST = os.getenv("MQTT_HOST", os.getenv("MQTT_BROKER", "iot_broker"))
+MQTT_HOST = os.getenv("MQTT_HOST", "iot_broker")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
+MQTT_USER = os.getenv("MQTT_USER", "wms_gateway")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "gateway_secure_pass")
 CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
-CLIENT_CERT_PATH = os.getenv("CLIENT_CERT_PATH", "/app/certs/client.crt")
-CLIENT_KEY_PATH = os.getenv("CLIENT_KEY_PATH", "/app/certs/client.key")
-MQTT_USER_FILE = os.getenv("MQTT_USER_FILE", "/run/secrets/mqtt_user")
-MQTT_PASS_FILE = os.getenv("MQTT_PASS_FILE", "/run/secrets/mqtt_password")
 
 
 def get_secret(file_path: str, default: str = "") -> str:
@@ -41,7 +38,7 @@ def get_secret(file_path: str, default: str = "") -> str:
         return default
 
 
-def get_db_connection():
+def get_db_conn():
     user = get_secret(PG_USER_FILE, os.getenv("PG_USER", "dale_admin"))
     password = get_secret(PG_PASSWORD_FILE, os.getenv("PG_PASSWORD", "admin_secure_pass"))
     return psycopg2.connect(
@@ -49,210 +46,119 @@ def get_db_connection():
         database=PG_DB,
         user=user,
         password=password,
-        connect_timeout=5,
-        cursor_factory=RealDictCursor
+        connect_timeout=3
     )
 
 
 def publish_mqtt_command(topic: str, payload: dict):
-    user = get_secret(MQTT_USER_FILE, os.getenv("MQTT_USER", "dale_admin"))
-    password = get_secret(MQTT_PASS_FILE, os.getenv("MQTT_PASSWORD", os.getenv("MQTT_PASS", "admin_secure_pass")))
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id="fastapi_command_gateway"
+    )
+    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
-    client = mqtt.Client(client_id=f"api_dispatcher_{os.getpid()}", protocol=mqtt.MQTTv311)
-    if user and password:
-        client.username_pw_set(username=user, password=password)
-
-    ca = CA_CERT_PATH if os.path.exists(CA_CERT_PATH) else ("/certs/ca.crt" if os.path.exists("/certs/ca.crt") else None)
-    cl_cert = CLIENT_CERT_PATH if os.path.exists(CLIENT_CERT_PATH) else ("/certs/client.crt" if os.path.exists("/certs/client.crt") else None)
-    cl_key = CLIENT_KEY_PATH if os.path.exists(CLIENT_KEY_PATH) else ("/certs/client.key" if os.path.exists("/certs/client.key") else None)
-
-    if ca:
-        client.tls_set(
-            ca_certs=ca,
-            certfile=cl_cert if (cl_cert and os.path.exists(cl_cert)) else None,
-            keyfile=cl_key if (cl_key and os.path.exists(cl_key)) else None,
-            tls_version=ssl.PROTOCOL_TLSv1_2
-        )
+    if os.path.exists(CA_CERT_PATH):
+        client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
         client.tls_insecure_set(True)
 
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=10)
     client.loop_start()
-
-    msg_info = client.publish(topic, json.dumps(payload), qos=1)
-    msg_info.wait_for_publish(timeout=5.0)
-
+    infot = client.publish(topic, json.dumps(payload), qos=1)
+    infot.wait_for_publish(timeout=3)
     client.loop_stop()
     client.disconnect()
-    logging.info(f"Published control payload to {topic}: {payload}")
 
 
-# --- Pydantic Models ---
-
-class TelemetrySnapshot(BaseModel):
+class DeviceStatus(BaseModel):
     serial_number: str
-    zone: Optional[str] = None
-    firmware: Optional[str] = None
-    motor_state: Optional[str] = None
-    filter_status: Optional[str] = None
-    vacuum_pressure: Optional[float] = None
-    fluid_volume: Optional[float] = None
-    connectivity_status: Optional[str] = None
-    timestamp: Optional[str] = None
+    zone: Optional[str]
+    firmware: Optional[str]
+    motor_state: Optional[str]
+    filter_status: Optional[str]
+    vacuum_pressure: Optional[float]
+    fluid_volume: Optional[float]
+    connectivity_status: Optional[str]
+    timestamp: Optional[str]
 
 
-class DeviceStats(BaseModel):
-    serial_number: str
-    bucket_interval: str
-    avg_vacuum: Optional[float] = None
-    min_vacuum: Optional[float] = None
-    max_vacuum: Optional[float] = None
-    avg_fluid_volume: Optional[float] = None
-    max_fluid_volume: Optional[float] = None
-    sample_count: int
-
-
-class DeviceCommandRequest(BaseModel):
-    command: Literal["START", "STOP", "PURGE_CANISTER", "RESET_FILTER"] = Field(
-        ..., description="Command to dispatch to the physical unit"
-    )
-    operator: Optional[str] = Field("sysadmin", description="Operator identifier dispatching the command")
-
-
-class DeviceCommandResponse(BaseModel):
-    status: str
-    serial_number: str
+class ControlCommandRequest(BaseModel):
     command: str
-    topic: str
-    message: str
+    operator: Optional[str] = "api_operator"
+    reason: Optional[str] = "manual_api_dispatch"
 
 
-# --- Endpoints ---
+@app.get("/")
+def root():
+    return {"status": "online", "service": "Medical-IoT Telemetry API"}
 
-@app.get("/health", status_code=status.HTTP_200_OK)
+
+@app.get("/health")
+@app.get("/api/v1/health")
 def health_check():
     try:
-        conn = get_db_connection()
+        conn = get_db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1;")
         conn.close()
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
-        return {"status": "degraded", "database_error": str(e)}
+        raise HTTPException(status_code=503, detail=f"Database unreachable: {e}")
 
 
-@app.get("/api/v1/devices", response_model=List[TelemetrySnapshot])
-def list_devices(
-    zone: Optional[str] = Query(None, description="Filter by hospital zone (e.g., OR-1, ED-Trauma)"),
-    motor_state: Optional[str] = Query(None, description="Filter by motor state (e.g., RUNNING, IDLE, ERROR)")
-):
+@app.get("/api/v1/devices", response_model=List[DeviceStatus])
+def list_devices():
     try:
-        conn = get_db_connection()
-        with conn.cursor() as cur:
-            query = """
+        conn = get_db_conn()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
                 SELECT DISTINCT ON (serial_number)
-                    serial_number, zone, firmware, motor_state, filter_status,
-                    vacuum_pressure, fluid_volume,
-                    CASE
-                        WHEN timestamp >= NOW() - INTERVAL '30 seconds' THEN 'ONLINE'
-                        ELSE 'OFFLINE'
-                    END AS connectivity_status,
-                    to_char(timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as timestamp
-                FROM telemetry
-                WHERE serial_number NOT LIKE 'TEST-%%'
-            """
-            params = []
-            if zone:
-                query += " AND zone = %s"
-                params.append(zone)
-            if motor_state:
-                query += " AND motor_state = %s"
-                params.append(motor_state)
-
-            query += " ORDER BY serial_number, timestamp DESC;"
-            cur.execute(query, tuple(params) if params else None)
-            rows = cur.fetchall()
-        conn.close()
-        return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
-
-
-@app.get("/api/v1/devices/{serial_number}", response_model=TelemetrySnapshot)
-def get_device(serial_number: str):
-    try:
-        conn = get_db_connection()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    serial_number, zone, firmware, motor_state, filter_status,
-                    vacuum_pressure, fluid_volume,
-                    CASE
-                        WHEN timestamp >= NOW() - INTERVAL '30 seconds' THEN 'ONLINE'
-                        ELSE 'OFFLINE'
-                    END AS connectivity_status,
-                    to_char(timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as timestamp
-                FROM telemetry
-                WHERE serial_number = %s
-                ORDER BY timestamp DESC
-                LIMIT 1;
-            """, (serial_number,))
-            row = cur.fetchone()
-        conn.close()
-        if not row:
-            raise HTTPException(status_code=404, detail=f"Device {serial_number} not found")
-        return row
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
-
-
-@app.get("/api/v1/devices/{serial_number}/stats", response_model=List[DeviceStats])
-def get_device_stats(
-    serial_number: str,
-    interval: str = Query("1 minute", description="TimescaleDB time bucket (e.g., '1 minute', '5 minutes', '1 hour')"),
-    lookback_minutes: int = Query(60, description="Window of historical data in minutes")
-):
-    try:
-        conn = get_db_connection()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
                     serial_number,
-                    to_char(time_bucket(%s::interval, timestamp), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS bucket_interval,
-                    ROUND(AVG(vacuum_pressure)::numeric, 2) AS avg_vacuum,
-                    ROUND(MIN(vacuum_pressure)::numeric, 2) AS min_vacuum,
-                    ROUND(MAX(vacuum_pressure)::numeric, 2) AS max_vacuum,
-                    ROUND(AVG(fluid_volume)::numeric, 2) AS avg_fluid_volume,
-                    ROUND(MAX(fluid_volume)::numeric, 2) AS max_fluid_volume,
-                    COUNT(*)::int AS sample_count
+                    zone,
+                    firmware,
+                    motor_state,
+                    filter_status,
+                    vacuum_pressure,
+                    fluid_volume,
+                    'ONLINE' as connectivity_status,
+                    to_char(timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as timestamp
                 FROM telemetry
-                WHERE serial_number = %s
-                  AND timestamp >= NOW() - (%s * INTERVAL '1 minute')
-                GROUP BY 1, time_bucket(%s::interval, timestamp)
-                ORDER BY 2 DESC;
-            """, (interval, serial_number, lookback_minutes, interval))
+                ORDER BY serial_number, timestamp DESC;
+            """)
             rows = cur.fetchall()
         conn.close()
         return rows
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TimescaleDB analytical rollup error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/devices/{serial_number}/control", response_model=DeviceCommandResponse)
-def send_device_command(serial_number: str, cmd_req: DeviceCommandRequest):
+@app.post("/api/v1/devices/{serial_number}/control")
+def send_device_command(serial_number: str, request: ControlCommandRequest):
     topic = f"hospital/devices/{serial_number}/control"
     payload = {
-        "serial_number": serial_number,
-        "command": cmd_req.command,
-        "operator": cmd_req.operator
+        "command": request.command.upper(),
+        "operator": request.operator,
+        "reason": request.reason
     }
     try:
         publish_mqtt_command(topic, payload)
-        return DeviceCommandResponse(
-            status="dispatched",
-            serial_number=serial_number,
-            command=cmd_req.command,
-            topic=topic,
-            message=f"Command {cmd_req.command} successfully published to {topic}"
-        )
+        logging.info(f"Dispatched command {payload['command']} to {serial_number}")
+        return {
+            "status": "success",
+            "device": serial_number,
+            "dispatched_command": payload
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to publish control command: {str(e)}")
+        logging.error(f"Failed to publish control command: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to publish MQTT control message: {e}")
+
+
+@app.post("/api/v1/devices/{serial_number}/reset")
+def reset_device(serial_number: str):
+    return send_device_command(
+        serial_number=serial_number,
+        request=ControlCommandRequest(
+            command="RUNNING",
+            operator="technician_api_reset",
+            reason="canister_serviced_manual_reset"
+        )
+    )
