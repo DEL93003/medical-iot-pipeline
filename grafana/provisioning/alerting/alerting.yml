@@ -1,0 +1,105 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: "Medical Fleet Safety Alerts"
+    folder: "Fleet Monitoring"
+    interval: 10s
+    rules:
+      - uid: alert_canister_overflow
+        title: "Critical Canister Overflow Risk"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: "TimescaleDB"
+            model:
+              rawSql: |
+                SELECT timestamp AS time, fluid_volume, serial_number
+                FROM telemetry
+                WHERE timestamp > NOW() - INTERVAL '1 minute'
+                ORDER BY timestamp ASC;
+              format: "time_series"
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params: [3.8]
+        annotations:
+          summary: "Device canister is near maximum capacity (>= 3.8L)"
+          description: "Fluid volume has reached critical threshold. Automatic standby engaged."
+        labels:
+          severity: "critical"
+          team: "clinical_engineering"
+
+      - uid: alert_vacuum_pressure_high
+        title: "Vacuum Pressure Exceeded Threshold"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: "TimescaleDB"
+            model:
+              rawSql: |
+                SELECT timestamp AS time, vacuum_pressure, serial_number
+                FROM telemetry
+                WHERE timestamp > NOW() - INTERVAL '1 minute'
+                ORDER BY timestamp ASC;
+              format: "time_series"
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "gt"
+                    params: [190.0]
+        annotations:
+          summary: "Vacuum pressure exceeded operating safety limits (> 190 mmHg)"
+          description: "High vacuum pressure detected on active suction circuit."
+        labels:
+          severity: "warning"
+          team: "biomedical_techs"
+
+contactPoints:
+  - orgId: 1
+    name: "Ticketing Webhook Receiver"
+    receivers:
+      - uid: ticketing_webhook_cp
+        type: webhook
+        settings:
+          url: "http://ticketing_service:6000/webhook"
+          httpMethod: "POST"
+
+policies:
+  - orgId: 1
+    receiver: "Ticketing Webhook Receiver"
+    group_by: ["alertname", "severity"]
+    group_wait: 5s
+    group_interval: 10s
+    repeat_interval: 1m
