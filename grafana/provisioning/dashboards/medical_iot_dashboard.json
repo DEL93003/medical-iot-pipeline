@@ -165,7 +165,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT DISTINCT ON (serial_number)\n  serial_number AS \"Device Serial\",\n  zone AS \"Zone\",\n  motor_state AS \"Motor State\",\n  filter_status AS \"Filter Status\",\n  vacuum_pressure AS \"Vacuum (mmHg)\",\n  fluid_volume AS \"Fluid Vol (L)\",\n  CASE\n    WHEN timestamp >= NOW() - INTERVAL '30 seconds' THEN 'ONLINE'\n    ELSE 'OFFLINE'\n  END AS \"Status\",\n  timestamp AS \"Last Heartbeat (UTC)\"\nFROM telemetry\nWHERE serial_number NOT LIKE 'TEST-%'\nORDER BY serial_number, timestamp DESC;",
+          "rawSql": "SELECT DISTINCT ON (serial_number)\n  serial_number AS \"Device Serial\",\n  zone AS \"Zone\",\n  motor_state AS \"Motor State\",\n  filter_status AS \"Filter Status\",\n  vacuum_pressure AS \"Vacuum (mmHg)\",\n  fluid_volume AS \"Fluid Vol (L)\",\n  CASE\n    WHEN timestamp >= (NOW() AT TIME ZONE 'UTC') - INTERVAL '30 seconds' THEN 'ONLINE'\n    WHEN timestamp >= NOW() - INTERVAL '30 seconds' THEN 'ONLINE'\n    ELSE 'OFFLINE'\n  END AS \"Status\",\n  timestamp AS \"Last Heartbeat (UTC)\"\nFROM telemetry\nWHERE serial_number NOT LIKE 'TEST-%'\nORDER BY serial_number, timestamp DESC;",
           "refId": "A"
         }
       ]
@@ -238,5 +238,5 @@
   "timezone": "browser",
   "title": "Medical IoT Fleet Telemetry",
   "uid": "adpgm2c",
-  "version": 3
+  "version": 4
 }

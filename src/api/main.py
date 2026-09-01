@@ -1,20 +1,36 @@
 import os
+import json
+import ssl
+import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import paho.mqtt.client as mqtt
 from fastapi import FastAPI, HTTPException, Query, status
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional, Literal
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = FastAPI(
     title="Medical IoT Fleet Telemetry API",
-    description="REST microservice providing fleet health, rollups, device filtering, and historical queries.",
-    version="1.1.1"
+    description="REST microservice providing fleet health, rollups, device filtering, and bidirectional control.",
+    version="1.2.1"
 )
 
+# Database Configurations
 PG_HOST = os.getenv("PG_HOST", "iot_database")
 PG_DB = os.getenv("PG_DB", "iot_telemetry")
 PG_USER_FILE = os.getenv("PG_USER_FILE", "/run/secrets/pg_user")
 PG_PASSWORD_FILE = os.getenv("PG_PASSWORD_FILE", "/run/secrets/pg_password")
+
+# MQTT Broker Configurations
+MQTT_HOST = os.getenv("MQTT_HOST", os.getenv("MQTT_BROKER", "iot_broker"))
+MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
+CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
+CLIENT_CERT_PATH = os.getenv("CLIENT_CERT_PATH", "/app/certs/client.crt")
+CLIENT_KEY_PATH = os.getenv("CLIENT_KEY_PATH", "/app/certs/client.key")
+MQTT_USER_FILE = os.getenv("MQTT_USER_FILE", "/run/secrets/mqtt_user")
+MQTT_PASS_FILE = os.getenv("MQTT_PASS_FILE", "/run/secrets/mqtt_password")
 
 
 def get_secret(file_path: str, default: str = "") -> str:
@@ -38,6 +54,40 @@ def get_db_connection():
     )
 
 
+def publish_mqtt_command(topic: str, payload: dict):
+    user = get_secret(MQTT_USER_FILE, os.getenv("MQTT_USER", "dale_admin"))
+    password = get_secret(MQTT_PASS_FILE, os.getenv("MQTT_PASSWORD", os.getenv("MQTT_PASS", "admin_secure_pass")))
+
+    client = mqtt.Client(client_id=f"api_dispatcher_{os.getpid()}", protocol=mqtt.MQTTv311)
+    if user and password:
+        client.username_pw_set(username=user, password=password)
+
+    ca = CA_CERT_PATH if os.path.exists(CA_CERT_PATH) else ("/certs/ca.crt" if os.path.exists("/certs/ca.crt") else None)
+    cl_cert = CLIENT_CERT_PATH if os.path.exists(CLIENT_CERT_PATH) else ("/certs/client.crt" if os.path.exists("/certs/client.crt") else None)
+    cl_key = CLIENT_KEY_PATH if os.path.exists(CLIENT_KEY_PATH) else ("/certs/client.key" if os.path.exists("/certs/client.key") else None)
+
+    if ca:
+        client.tls_set(
+            ca_certs=ca,
+            certfile=cl_cert if (cl_cert and os.path.exists(cl_cert)) else None,
+            keyfile=cl_key if (cl_key and os.path.exists(cl_key)) else None,
+            tls_version=ssl.PROTOCOL_TLSv1_2
+        )
+        client.tls_insecure_set(True)
+
+    client.connect(MQTT_HOST, MQTT_PORT, keepalive=10)
+    client.loop_start()
+
+    msg_info = client.publish(topic, json.dumps(payload), qos=1)
+    msg_info.wait_for_publish(timeout=5.0)
+
+    client.loop_stop()
+    client.disconnect()
+    logging.info(f"Published control payload to {topic}: {payload}")
+
+
+# --- Pydantic Models ---
+
 class TelemetrySnapshot(BaseModel):
     serial_number: str
     zone: Optional[str] = None
@@ -60,6 +110,23 @@ class DeviceStats(BaseModel):
     max_fluid_volume: Optional[float] = None
     sample_count: int
 
+
+class DeviceCommandRequest(BaseModel):
+    command: Literal["START", "STOP", "PURGE_CANISTER", "RESET_FILTER"] = Field(
+        ..., description="Command to dispatch to the physical unit"
+    )
+    operator: Optional[str] = Field("sysadmin", description="Operator identifier dispatching the command")
+
+
+class DeviceCommandResponse(BaseModel):
+    status: str
+    serial_number: str
+    command: str
+    topic: str
+    message: str
+
+
+# --- Endpoints ---
 
 @app.get("/health", status_code=status.HTTP_200_OK)
 def health_check():
@@ -168,3 +235,24 @@ def get_device_stats(
         return rows
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TimescaleDB analytical rollup error: {str(e)}")
+
+
+@app.post("/api/v1/devices/{serial_number}/control", response_model=DeviceCommandResponse)
+def send_device_command(serial_number: str, cmd_req: DeviceCommandRequest):
+    topic = f"hospital/devices/{serial_number}/control"
+    payload = {
+        "serial_number": serial_number,
+        "command": cmd_req.command,
+        "operator": cmd_req.operator
+    }
+    try:
+        publish_mqtt_command(topic, payload)
+        return DeviceCommandResponse(
+            status="dispatched",
+            serial_number=serial_number,
+            command=cmd_req.command,
+            topic=topic,
+            message=f"Command {cmd_req.command} successfully published to {topic}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to publish control command: {str(e)}")

@@ -7,8 +7,8 @@ services:
       - "1883:1883"
       - "8883:8883"
     volumes:
-      - ./mosquitto/config:/mosquitto/config:ro
-      - ./certs:/mosquitto/certs:ro
+      - ./mosquitto/config:/mosquitto/config
+      - ./certs:/mosquitto/certs
     networks:
       - wms-net
     restart: always
@@ -61,6 +61,7 @@ services:
       - PG_DB=iot_telemetry
       - PG_USER_FILE=/run/secrets/pg_user
       - PG_PASSWORD_FILE=/run/secrets/pg_password
+      - TICKETING_WEBHOOK_URL=http://ticketing_service:6000/webhook
     depends_on:
       iot_broker:
         condition: service_started
@@ -123,6 +124,21 @@ services:
     depends_on:
       iot_broker:
         condition: service_started
+    restart: always
+
+  # --- Biomedical Incident Ticketing Microservice ---
+  ticketing_service:
+    build: .
+    container_name: ticketing_service
+    command: python -u ticketing_service.py
+    ports:
+      - "6000:6000"
+    networks:
+      - wms-net
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: always
 
   # --- Grafana Dashboard Engine ---
