@@ -57,7 +57,7 @@ jobs:
 
           password_file /mosquitto/config/password_file
           acl_file /mosquitto/config/aclfile
-          CONF
+CONF
 
           cat << 'ACL' > mosquitto/config/aclfile
           user wms_device
@@ -66,7 +66,7 @@ jobs:
 
           user wms_gateway
           topic readwrite hospital/devices/#
-          ACL
+ACL
 
           docker run --rm -v "$(pwd)/mosquitto/config:/config" eclipse-mosquitto:2.0 sh -c "
           mosquitto_passwd -c -b /config/password_file wms_device device_secure_pass && \
@@ -87,15 +87,6 @@ jobs:
             fi
             echo "Waiting for database to initialize..."
             sleep 2
-          done
-
-          echo "Waiting for Mosquitto TLS broker on port 8883..."
-          for i in {1..30}; do
-            if nc -z localhost 8883 2>/dev/null || docker compose exec -T iot_broker nc -z localhost 8883 2>/dev/null; then
-              echo "Mosquitto broker is accepting TLS connections."
-              break
-            fi
-            sleep 1
           done
 
       - name: Initialize Database Schema
@@ -122,7 +113,7 @@ jobs:
       - name: Wait for API Microservice
         run: |
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || true)
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/devices || curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ || true)
             if [ "$STATUS" = "200" ]; then
               echo "API is online and accepting traffic."
               break
@@ -142,6 +133,8 @@ jobs:
           docker compose logs telemetry_api
           echo "=== Consumer Logs ==="
           docker compose logs mqtt_consumer
+          echo "=== Ticketing Logs ==="
+          docker compose logs ticketing_service
           echo "=== Broker Logs ==="
           docker compose logs iot_broker
 
