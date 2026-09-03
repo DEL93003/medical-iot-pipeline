@@ -1,15 +1,14 @@
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 from src.server.mqtt_consumer import check_and_alert_anomalies
 
 def test_closed_loop_standby_failsafe_trigger():
     """Verify that canister fluid >= 3.8L issues a STANDBY control message."""
     mock_mqtt = MagicMock()
-    
+
     with patch("src.server.mqtt_consumer.mqtt_client_instance", mock_mqtt), \
          patch("urllib.request.urlopen") as mock_urlopen:
-        
+
         # Configure mock HTTP response for webhook
         mock_response = MagicMock()
         mock_response.status = 201

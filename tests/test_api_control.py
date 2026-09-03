@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from src.api.main import app
@@ -52,13 +51,13 @@ def test_send_purge_command(mock_publish):
         "reason": "automated_unit_test"
     }
     response = client.post("/api/v1/devices/WMS-ED-01/control", json=payload)
-    
+
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["status"] == "success"
     assert res_data["device"] == "WMS-ED-01"
     assert res_data["dispatched_command"]["command"] == "PURGE_CANISTER"
-    
+
     mock_publish.assert_called_once_with(
         "hospital/devices/WMS-ED-01/control",
         {

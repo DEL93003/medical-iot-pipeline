@@ -2,4 +2,4 @@
 max-line-length = 180
 max-complexity = 15
 exclude = .git,__pycache__,.venv,venv,build,dist
-ignore = W293,W291,E302,E305,E402,F541
+ignore = W293,W291,E302,E305,E402,F541,F401

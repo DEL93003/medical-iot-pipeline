@@ -3,7 +3,6 @@ import ssl
 import time
 import json
 import socket
-import pytest
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 import psycopg2
