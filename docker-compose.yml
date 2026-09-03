@@ -26,6 +26,7 @@ services:
       - pg_password
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5432:5432"
     networks:
