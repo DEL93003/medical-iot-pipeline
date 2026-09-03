@@ -35,7 +35,7 @@ def test_reset_device_endpoint(mock_mqtt_class):
     data = response.json()
     assert data["status"] == "success"
     assert data["device"] == "WMS-OR-01"
-    assert data["dispatched_command"]["command"] == "RUNNING"
+    assert data["dispatched_command"]["command"] == "PURGE_CANISTER"
     assert data["dispatched_command"]["operator"] == "technician_api_reset"
 
 @patch("src.api.main.mqtt.Client")
