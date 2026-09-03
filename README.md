@@ -4,6 +4,16 @@ A secure, containerized, and automated telemetry pipeline engineered for clinica
 
 ---
 
+## Real-Time Observability & Fleet Telemetry
+
+![Medical IoT Fleet Dashboard](docs/grafana-dashboard.png)
+
+* **Live Fleet Status**: Real-time tracking of motor states, suction pressure ($mmHg$), and waste fluid volume ($L$).
+* **Failsafe Telemetry**: Visual indicators for automated `STANDBY` interlocks when canister volumes breach safe operating thresholds ($\ge 3.5L$ warning, $\ge 3.8L$ emergency cut-off).
+* **Maintenance & Filter Health**: Instant visual alerts for vacuum saturation and canister maintenance cycles.
+
+---
+
 ## 1. System Architecture Topology
 
 ```text
