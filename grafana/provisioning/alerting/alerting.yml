@@ -8,6 +8,8 @@ groups:
     rules:
       - uid: alert_canister_overflow
         title: "Critical Canister Overflow Risk"
+        noDataState: OK
+        execErrState: OK
         condition: C
         data:
           - refId: A
@@ -17,7 +19,7 @@ groups:
             datasourceUid: "TimescaleDB"
             model:
               rawSql: |
-                SELECT timestamp AS time, fluid_volume, serial_number
+                SELECT timestamp AS time, fluid_volume AS value, serial_number AS metric, zone
                 FROM telemetry
                 WHERE timestamp > NOW() - INTERVAL '1 minute'
                 ORDER BY timestamp ASC;
@@ -48,6 +50,8 @@ groups:
 
       - uid: alert_vacuum_pressure_high
         title: "Vacuum Pressure Exceeded Threshold"
+        noDataState: OK
+        execErrState: OK
         condition: C
         data:
           - refId: A
@@ -57,7 +61,7 @@ groups:
             datasourceUid: "TimescaleDB"
             model:
               rawSql: |
-                SELECT timestamp AS time, vacuum_pressure, serial_number
+                SELECT timestamp AS time, vacuum_pressure AS value, serial_number AS metric, zone
                 FROM telemetry
                 WHERE timestamp > NOW() - INTERVAL '1 minute'
                 ORDER BY timestamp ASC;
@@ -84,6 +88,50 @@ groups:
           description: "High vacuum pressure detected on active suction circuit."
         labels:
           severity: "warning"
+          team: "biomedical_techs"
+
+      - uid: alert_vacuum_loss_detected
+        title: "WMS Vacuum Loss Detected"
+        noDataState: OK
+        execErrState: OK
+        condition: C
+        for: 10s
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: "TimescaleDB"
+            model:
+              rawSql: |
+                SELECT timestamp AS time, vacuum_pressure AS value, serial_number AS metric, zone
+                FROM telemetry
+                WHERE timestamp > NOW() - INTERVAL '1 minute'
+                  AND motor_state = 'RUNNING'
+                ORDER BY timestamp ASC;
+              format: "time_series"
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: "reduce"
+              expression: "A"
+              reducer: "last"
+              settings:
+                mode: "dropNN"
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: "threshold"
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: "lt"
+                    params: [80.0]
+        annotations:
+          summary: "WMS Vacuum Loss Detected"
+          description: "Device vacuum has dropped below 80 mmHg while suction motor is in RUNNING state."
+        labels:
+          severity: "critical"
           team: "biomedical_techs"
 
 contactPoints:

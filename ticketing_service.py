@@ -1,23 +1,17 @@
 import json
 import logging
-import sys
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-
-TICKET_FILE = "incident_tickets.txt"
+TICKET_FILE = "incident_tickets.log"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 class TicketingHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/webhook':
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length)
-            
+
             try:
                 data = json.loads(body.decode('utf-8'))
             except Exception as e:
@@ -27,10 +21,25 @@ class TicketingHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "rejected", "reason": "Invalid JSON"}).encode('utf-8'))
                 return
 
-            device = data.get("device_serial", "Unknown")
-            zone = data.get("zone", "Unknown")
-            condition = data.get("condition", "Unknown")
-            value = data.get("value", "N/A")
+            # Grafana Alertmanager payload
+            if "alerts" in data and isinstance(data["alerts"], list) and len(data["alerts"]) > 0:
+                first_alert = data["alerts"][0]
+                labels = first_alert.get("labels", {})
+                annotations = first_alert.get("annotations", {})
+                values = first_alert.get("values", {})
+
+
+                device = labels.get("serial_number") or labels.get("device_serial") or labels.get("metric") or "Unknown"
+                zone = labels.get("zone", "Hospital Floor")
+                condition = annotations.get("summary") or labels.get("alertname", "Unknown Fault")
+                value = list(values.values())[0] if values else "N/A"
+            else:
+                # Direct pipeline payload
+                device = data.get("device_serial", "Unknown")
+                zone = data.get("zone", "Unknown")
+                condition = data.get("condition") or data.get("condition_type", "Unknown")
+                value = data.get("value") or data.get("current_value", "N/A")
+
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             ticket_entry = f"""
@@ -58,7 +67,7 @@ Status           : ASSIGNED TO FIELD TECHNICIAN
             self.end_headers()
 
     def log_message(self, format, *args):
-        pass  # Suppress default noisy stdlib access logging
+        pass
 
 if __name__ == "__main__":
     server_address = ('0.0.0.0', 6000)
