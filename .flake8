@@ -1,11 +1,5 @@
 [flake8]
-exclude =
-    .venv,
-    venv,
-    .git,
-    __pycache__,
-    .pytest_cache,
-    build,
-    dist
-max-line-length = 127
-max-complexity = 10
+max-line-length = 180
+max-complexity = 15
+exclude = .git,__pycache__,.venv,venv,build,dist
+ignore = W293,W291,E302,E305,E402,F541

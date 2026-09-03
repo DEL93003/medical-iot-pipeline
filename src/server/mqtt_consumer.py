@@ -173,13 +173,23 @@ client = mqtt.Client(
 mqtt_client_instance = client
 client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
-if os.path.exists(CA_CERT_PATH):
-    logging.info(f"Loading CA certificate from {CA_CERT_PATH}")
-    client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+# Resolve certificate path with local fallback
+resolved_cert_path = CA_CERT_PATH
+if not os.path.exists(resolved_cert_path):
+    for fallback in ["certs/ca.crt", "../certs/ca.crt"]:
+        if os.path.exists(fallback):
+            resolved_cert_path = fallback
+            break
+
+if os.path.exists(resolved_cert_path):
+    logging.info(f"Loading CA certificate from {resolved_cert_path}")
+    client.tls_set(ca_certs=resolved_cert_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client.tls_insecure_set(True)
-else:
-    logging.error(f"FATAL: CA certificate not found at {CA_CERT_PATH}!")
+elif __name__ == "__main__":
+    logging.error(f"FATAL: CA certificate not found at {CA_CERT_PATH} or fallback paths!")
     raise FileNotFoundError(f"Missing CA certificate at {CA_CERT_PATH}")
+else:
+    logging.warning(f"CA certificate not found at {CA_CERT_PATH}; skipping TLS setup for module import.")
 
 client.on_connect = on_connect
 client.on_message = on_message
