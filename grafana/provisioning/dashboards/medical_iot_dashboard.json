@@ -249,7 +249,7 @@
     {
       "collapsed": false,
       "gridPos": {
-        "h": 10,
+        "h": 6,
         "w": 12,
         "x": 12,
         "y": 4
@@ -318,7 +318,7 @@
         "h": 12,
         "w": 14,
         "x": 0,
-        "y": 14
+        "y": 22
       },
       "id": 3,
       "title": "Fleet Health & Live Connectivity Status",
@@ -383,7 +383,7 @@
         "h": 12,
         "w": 10,
         "x": 14,
-        "y": 14
+        "y": 22
       },
       "id": 4,
       "title": "Filter Saturation & Maintenance Alerts",
@@ -428,6 +428,189 @@
           "format": "table",
           "rawQuery": true,
           "rawSql": "SELECT DISTINCT ON (serial_number) serial_number AS \"metric\", filter_status AS \"value\", timestamp AS \"time\" FROM telemetry WHERE serial_number NOT LIKE 'TEST-%' ORDER BY serial_number, timestamp DESC;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Live Fleet Incident & Auto-Remediation Audit Stream",
+      "type": "table",
+      "datasource": "TimescaleDB",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "motor_state"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "RUNNING": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "STANDBY": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "filter_status"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Good": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "Replacement Required": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "timestamp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT timestamp, serial_number, zone, motor_state, filter_status, round(vacuum_pressure::numeric, 1) as vacuum_mmhg, round(fluid_volume::numeric, 2) as fluid_liters FROM telemetry WHERE fluid_volume >= 3.5 OR filter_status != 'Good' OR motor_state = 'STANDBY' ORDER BY timestamp DESC LIMIT 50;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Vacuum Suction Pressure History (mmHg) [Target: 100-200]",
+      "type": "timeseries",
+      "datasource": "TimescaleDB",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "showPoints": "auto",
+            "pointSize": 5
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "mmHg",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 220
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT timestamp AS \"time\", serial_number AS metric, vacuum_pressure AS value FROM telemetry WHERE $__timeFilter(timestamp) ORDER BY 1;",
           "refId": "A"
         }
       ]
