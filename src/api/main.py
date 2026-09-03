@@ -3,6 +3,7 @@ import logging
 import os
 import ssl
 import sys
+from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -16,8 +17,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-app = FastAPI(title="Medical-IoT Telemetry API", version="1.0.0")
-
 PG_HOST = os.getenv("PG_HOST", "iot_database")
 PG_DB = os.getenv("PG_DB", "iot_telemetry")
 PG_USER_FILE = os.getenv("PG_USER_FILE", "/run/secrets/pg_user")
@@ -28,6 +27,8 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
 MQTT_USER = os.getenv("MQTT_USER", "wms_gateway")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "gateway_secure_pass")
 CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
+
+mqtt_client = None
 
 
 def get_secret(file_path: str, default: str = "") -> str:
@@ -50,23 +51,52 @@ def get_db_conn():
     )
 
 
+def init_mqtt():
+    global mqtt_client
+    try:
+        user = os.getenv("MQTT_USER", "wms_gateway")
+        password = os.getenv("MQTT_PASSWORD", "gateway_secure_pass")
+
+        mqtt_client = mqtt.Client(
+            client_id="telemetry_api_gateway",
+            protocol=mqtt.MQTTv311
+        )
+        mqtt_client.username_pw_set(user, password)
+
+        if os.path.exists(CA_CERT_PATH):
+            mqtt_client.tls_set(
+                ca_certs=CA_CERT_PATH,
+                tls_version=ssl.PROTOCOL_TLSv1_2
+            )
+            mqtt_client.tls_insecure_set(True)
+
+        mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+        mqtt_client.loop_start()
+        logging.info("Persistent MQTT Gateway Client initialized and connected.")
+    except Exception as e:
+        logging.error(f"Failed to initialize MQTT Gateway Client: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_mqtt()
+    yield
+    global mqtt_client
+    if mqtt_client:
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+
+
+app = FastAPI(title="Medical-IoT Telemetry API", version="1.0.0", lifespan=lifespan)
+
+
 def publish_mqtt_command(topic: str, payload: dict):
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id="fastapi_command_gateway"
-    )
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    global mqtt_client
+    if not mqtt_client:
+        init_mqtt()
 
-    if os.path.exists(CA_CERT_PATH):
-        client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
-        client.tls_insecure_set(True)
-
-    client.connect(MQTT_HOST, MQTT_PORT, keepalive=10)
-    client.loop_start()
-    infot = client.publish(topic, json.dumps(payload), qos=1)
-    infot.wait_for_publish(timeout=3)
-    client.loop_stop()
-    client.disconnect()
+    msg_info = mqtt_client.publish(topic, json.dumps(payload), qos=1)
+    msg_info.wait_for_publish(timeout=5)
 
 
 class DeviceStatus(BaseModel):
@@ -122,12 +152,14 @@ def list_devices():
                     'ONLINE' as connectivity_status,
                     to_char(timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as timestamp
                 FROM telemetry
+                WHERE serial_number NOT LIKE 'TEST-%'
                 ORDER BY serial_number, timestamp DESC;
             """)
             rows = cur.fetchall()
         conn.close()
         return rows
     except Exception as e:
+        logging.error(f"Error fetching devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -157,7 +189,7 @@ def reset_device(serial_number: str):
     return send_device_command(
         serial_number=serial_number,
         request=ControlCommandRequest(
-            command="RUNNING",
+            command="PURGE_CANISTER",
             operator="technician_api_reset",
             reason="canister_serviced_manual_reset"
         )

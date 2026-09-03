@@ -8,13 +8,13 @@ import paho.mqtt.client as mqtt
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-MQTT_HOST = os.getenv("MQTT_HOST", "iot_broker")
+MQTT_BROKER = os.getenv("MQTT_HOST", os.getenv("MQTT_BROKER", "iot_broker"))
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
-MQTT_USER = os.getenv("MQTT_USER", "wms_device")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "device_secure_pass")
 CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
 CLIENT_CERT_PATH = os.getenv("CLIENT_CERT_PATH", "/app/certs/client.crt")
 CLIENT_KEY_PATH = os.getenv("CLIENT_KEY_PATH", "/app/certs/client.key")
+MQTT_USER_FILE = os.getenv("MQTT_USER_FILE", "/run/secrets/mqtt_user")
+MQTT_PASS_FILE = os.getenv("MQTT_PASSWORD_FILE", os.getenv("MQTT_PASS_FILE", "/run/secrets/mqtt_password"))
 
 DEVICES = [
     {"serial_number": "WMS-OR-01", "zone": "OR-1", "firmware": "v2.1.0", "motor_state": "RUNNING", "filter_status": "Good", "vacuum_pressure": 140.0, "fluid_volume": 1.2},
@@ -23,65 +23,104 @@ DEVICES = [
     {"serial_number": "WMS-ED-01", "zone": "ED-Trauma", "firmware": "v2.2.0", "motor_state": "RUNNING", "filter_status": "Good", "vacuum_pressure": 135.0, "fluid_volume": 3.1}
 ]
 
-def on_connect(client, userdata, flags, reason_code, properties=None):
-    if reason_code == 0:
-        logging.info("Simulator successfully connected to MQTT Broker (Code 0)")
+
+def get_secret(file_path: str, default: str = "") -> str:
+    try:
+        with open(file_path, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return default
+
+
+def apply_command_to_device(dev: dict, cmd: str, operator: str = ""):
+    cmd_upper = (cmd or "").upper()
+    sn = dev["serial_number"]
+
+    if cmd_upper in ["RETURN_HOME", "EMERGENCY_STOP", "PARK"]:
+        dev["motor_state"] = "EMERGENCY_PARKED"
+        dev["vacuum_pressure"] = 0.0
+        logging.warning(f"[{sn}] EMERGENCY RETURN HOME ACTIVATED by {operator or 'system'}")
+
+    elif cmd_upper in ["PURGE_CANISTER", "RESET", "DRAIN"]:
+        dev["fluid_volume"] = 0.0
+        dev["motor_state"] = "RUNNING"
+        dev["vacuum_pressure"] = round(random.uniform(130.0, 155.0), 2)
+        dev["filter_status"] = "Good"
+        logging.info(f"[{sn}] Canister drained to 0.0L & motor reset to RUNNING by {operator or 'tech'}")
+
+    elif cmd_upper in ["STANDBY", "STOP"]:
+        dev["motor_state"] = "STANDBY"
+        dev["vacuum_pressure"] = 0.0
+        logging.info(f"[{sn}] Motor switched to STANDBY")
+
+    elif cmd_upper in ["START", "RUNNING"]:
+        dev["motor_state"] = "RUNNING"
+        dev["vacuum_pressure"] = round(random.uniform(130.0, 160.0), 2)
+        logging.info(f"[{sn}] Motor started to RUNNING")
+
+    elif cmd_upper in ["RESET_FILTER"]:
+        dev["filter_status"] = "Good"
+        logging.info(f"[{sn}] Filter reset to Good")
+
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logging.info(f"Simulator successfully connected to MQTT Broker (Code {rc})")
         for dev in DEVICES:
             control_topic = f"hospital/devices/{dev['serial_number']}/control"
             client.subscribe(control_topic, qos=1)
-            logging.info(f"Subscribed to control topic: {control_topic}")
+            logging.info(f"Subscribed to: {control_topic}")
+        
+        fleet_topic = "hospital/devices/fleet/control"
+        client.subscribe(fleet_topic, qos=1)
+        logging.info(f"Subscribed to fleet broadcast: {fleet_topic}")
     else:
-        logging.error(f"Failed to connect to MQTT Broker, return code: {reason_code}")
+        logging.error(f"Failed to connect to MQTT broker, return code {rc}")
+
 
 def on_message(client, userdata, msg):
     try:
+        payload = json.loads(msg.payload.decode())
         topic_parts = msg.topic.split("/")
-        sn = topic_parts[2] if len(topic_parts) >= 3 else "UNKNOWN"
-        payload = json.loads(msg.payload.decode("utf-8"))
-        logging.info(f"Received control command on {msg.topic}: {payload}")
-        cmd = payload.get("command")
-        for dev in DEVICES:
-            if dev["serial_number"] == sn:
-                if cmd in ["STOP", "OFF"]:
-                    dev["motor_state"] = "OFF"
-                    dev["vacuum_pressure"] = 0.0
-                elif cmd == "STANDBY":
-                    dev["motor_state"] = "STANDBY"
-                    dev["vacuum_pressure"] = 0.0
-                elif cmd in ["START", "RUN"]:
-                    dev["motor_state"] = "RUNNING"
-                logging.info(f"Device {sn} updated motor state to {dev['motor_state']}")
+        
+        sn_from_topic = topic_parts[2] if len(topic_parts) >= 3 else None
+        sn = payload.get("serial_number", sn_from_topic)
+        cmd = payload.get("command", "")
+        operator = payload.get("operator", "system")
+
+        logging.info(f"[MQTT RECV] Topic: {msg.topic} | Target: {sn} | Command: {cmd}")
+
+        if sn == "fleet" or msg.topic == "hospital/devices/fleet/control":
+            for dev in DEVICES:
+                apply_command_to_device(dev, cmd, operator)
+        else:
+            for dev in DEVICES:
+                if dev["serial_number"] == sn:
+                    apply_command_to_device(dev, cmd, operator)
     except Exception as e:
-        logging.error(f"Error handling incoming MQTT message: {e}")
+        logging.error(f"Error processing MQTT message: {e}")
+
 
 def main():
-    client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id="wms_fleet_simulator"
-    )
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    user = get_secret(MQTT_USER_FILE, os.getenv("MQTT_USER", "wms_device"))
+    password = get_secret(MQTT_PASS_FILE, os.getenv("MQTT_PASSWORD", os.getenv("MQTT_PASS", "device_secure_pass")))
+
+    client = mqtt.Client(client_id="wms_fleet_simulator", protocol=mqtt.MQTTv311)
+    client.username_pw_set(username=user, password=password)
 
     if os.path.exists(CA_CERT_PATH):
-        logging.info(f"Using CA Certificate at {CA_CERT_PATH}")
         client.tls_set(
             ca_certs=CA_CERT_PATH,
-            tls_version=ssl.PROTOCOL_TLS_CLIENT
+            certfile=CLIENT_CERT_PATH if os.path.exists(CLIENT_CERT_PATH) else None,
+            keyfile=CLIENT_KEY_PATH if os.path.exists(CLIENT_KEY_PATH) else None,
+            tls_version=ssl.PROTOCOL_TLSv1_2
         )
         client.tls_insecure_set(True)
 
     client.on_connect = on_connect
     client.on_message = on_message
 
-    connected = False
-    while not connected:
-        try:
-            logging.info(f"Attempting connection to MQTT broker at {MQTT_HOST}:{MQTT_PORT}...")
-            client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-            connected = True
-        except Exception as e:
-            logging.warning(f"Broker connection failed ({e}). Retrying in 3 seconds...")
-            time.sleep(3)
-
+    client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
     client.loop_start()
 
     while True:
@@ -91,7 +130,7 @@ def main():
                 dev["fluid_volume"] = min(4.0, dev["fluid_volume"] + random.uniform(0.01, 0.03))
                 if dev["fluid_volume"] >= 3.8:
                     dev["filter_status"] = "Replacement Required"
-            else:
+            elif dev["motor_state"] in ["STANDBY", "EMERGENCY_PARKED"]:
                 dev["vacuum_pressure"] = 0.0
 
             telemetry_topic = f"hospital/devices/{dev['serial_number']}/telemetry"
@@ -107,6 +146,7 @@ def main():
             client.publish(telemetry_topic, json.dumps(payload), qos=1)
 
         time.sleep(3)
+
 
 if __name__ == "__main__":
     main()

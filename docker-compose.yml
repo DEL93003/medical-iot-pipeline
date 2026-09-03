@@ -90,8 +90,8 @@ services:
       - PYTHONUNBUFFERED=1
       - MQTT_HOST=iot_broker
       - MQTT_PORT=8883
-      - MQTT_USER=wms_device
-      - MQTT_PASSWORD=device_secure_pass
+      - MQTT_USER=wms_gateway
+      - MQTT_PASSWORD=gateway_secure_pass
       - CA_CERT_PATH=/app/certs/ca.crt
       - PG_HOST=iot_database
       - PG_DB=iot_telemetry
