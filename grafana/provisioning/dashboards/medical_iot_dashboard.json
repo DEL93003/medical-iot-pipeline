@@ -10,12 +10,175 @@
   "liveNow": false,
   "panels": [
     {
+      "id": 5,
+      "title": "Online Fleet Units",
+      "type": "stat",
+      "datasource": "TimescaleDB",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 4
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT serial_number) as active_units FROM telemetry WHERE timestamp > NOW() - INTERVAL '60 seconds';",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Critical Canisters (> 3.5L)",
+      "type": "stat",
+      "datasource": "TimescaleDB",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as overflow_risk FROM (SELECT DISTINCT ON (serial_number) fluid_volume FROM telemetry WHERE timestamp > NOW() - INTERVAL '60 seconds' ORDER BY serial_number, timestamp DESC) latest WHERE fluid_volume >= 3.5;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Filter Service Required",
+      "type": "stat",
+      "datasource": "TimescaleDB",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as degraded_filters FROM (SELECT DISTINCT ON (serial_number) filter_status FROM telemetry WHERE timestamp > NOW() - INTERVAL '60 seconds' ORDER BY serial_number, timestamp DESC) latest WHERE filter_status != 'Good';",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 4
       },
       "id": 1,
       "title": "Fluid Volume Monitoring (L) [Alarm > 3.5L]",
@@ -39,9 +202,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "orange", "value": 3.0 },
-              { "color": "red", "value": 3.5 }
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 3.0
+              },
+              {
+                "color": "red",
+                "value": 3.5
+              }
             ]
           },
           "unit": "litre"
@@ -53,7 +225,10 @@
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true,
-          "calcs": ["lastNotNull", "max"]
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -77,7 +252,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 4
       },
       "id": 2,
       "title": "Vacuum Pressure (mmHg) [Target: 100-200]",
@@ -91,10 +266,22 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": 0 },
-              { "color": "yellow", "value": 100 },
-              { "color": "green", "value": 130 },
-              { "color": "red", "value": 220 }
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "green",
+                "value": 130
+              },
+              {
+                "color": "red",
+                "value": 220
+              }
             ]
           },
           "unit": "pressurehg",
@@ -107,7 +294,9 @@
         "displayMode": "gradient",
         "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         }
@@ -129,7 +318,7 @@
         "h": 12,
         "w": 14,
         "x": 0,
-        "y": 10
+        "y": 14
       },
       "id": 3,
       "title": "Fleet Health & Live Connectivity Status",
@@ -139,16 +328,34 @@
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Status" },
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
             "properties": [
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-background", "mode": "basic" }
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
               },
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "ONLINE": { "color": "dark-green", "index": 0 }, "OFFLINE": { "color": "dark-red", "index": 1 } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "ONLINE": {
+                        "color": "dark-green",
+                        "index": 0
+                      },
+                      "OFFLINE": {
+                        "color": "dark-red",
+                        "index": 1
+                      }
+                    }
+                  }
                 ]
               }
             ]
@@ -176,7 +383,7 @@
         "h": 12,
         "w": 10,
         "x": 14,
-        "y": 10
+        "y": 14
       },
       "id": 4,
       "title": "Filter Saturation & Maintenance Alerts",
@@ -229,7 +436,10 @@
   "refresh": "5s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["medical", "iot"],
+  "tags": [
+    "medical",
+    "iot"
+  ],
   "time": {
     "from": "now-5m",
     "to": "now"
