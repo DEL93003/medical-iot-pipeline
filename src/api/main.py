@@ -81,7 +81,6 @@ def init_mqtt():
 async def lifespan(app: FastAPI):
     init_mqtt()
     yield
-    global mqtt_client
     if mqtt_client:
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
@@ -91,7 +90,6 @@ app = FastAPI(title="Medical-IoT Telemetry API", version="1.0.0", lifespan=lifes
 
 
 def publish_mqtt_command(topic: str, payload: dict):
-    global mqtt_client
     if not mqtt_client:
         init_mqtt()
 
