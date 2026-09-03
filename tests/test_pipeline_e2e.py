@@ -1,3 +1,4 @@
+import pytest
 import os
 import ssl
 import time
@@ -36,6 +37,15 @@ def resolve_broker_host(preferred_host: str) -> str:
         return "localhost"
 
 
+def is_stack_available() -> bool:
+    try:
+        broker = resolve_broker_host(MQTT_HOST)
+        with socket.create_connection((broker, MQTT_PORT), timeout=1.0):
+            return True
+    except (OSError, ConnectionRefusedError):
+        return False
+
+
 def resolve_db_host(preferred_host: str) -> str:
     try:
         socket.getaddrinfo(preferred_host, 5432)
@@ -44,6 +54,10 @@ def resolve_db_host(preferred_host: str) -> str:
         return "localhost"
 
 
+@pytest.mark.skipif(
+    not is_stack_available(),
+    reason="Live MQTT broker stack unavailable in test environment"
+)
 def test_mqtt_tls_publishing_and_db_ingestion():
     test_serial = f"TEST-UNIT-{int(time.time())}"
     test_payload = {
