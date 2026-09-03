@@ -1,144 +1,35 @@
-name: Medical IoT Fleet CI/CD Pipeline
+name: CI Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
 
 jobs:
-  build-test:
+  lint-and-test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
 
-      - name: Install Linting Tools
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8
+          pip install -r requirements.txt
+          pip install flake8 pytest httpx
 
-      - name: Code Quality & Linting
+      - name: Run Flake8 Quality Linter
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 src/ tests/
 
-      - name: Provision Secrets & TLS Certificates
+      - name: Execute Pytest Suite
         run: |
-          mkdir -p certs .docker_secrets mosquitto/config
-          openssl req -new -x509 -days 365 -nodes -out certs/ca.crt -keyout certs/ca.key -subj "/CN=Medical-IoT-CA"
-          openssl req -new -nodes -out certs/server.csr -keyout certs/server.key -subj "/CN=iot_broker"
-          openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/server.crt -days 365
-          chmod 644 certs/*
-          printf "dale_admin" > .docker_secrets/postgres_user.txt
-          printf "admin_secure_pass" > .docker_secrets/postgres_password.txt
-          chmod 600 .docker_secrets/*
-
-      - name: Generate Mosquitto Auth & Config
-        run: |
-          cat << 'CONF' > mosquitto/config/mosquitto.conf
-          per_listener_settings false
-
-          listener 1883
-          allow_anonymous true
-
-          listener 8883
-          cafile /mosquitto/certs/ca.crt
-          certfile /mosquitto/certs/server.crt
-          keyfile /mosquitto/certs/server.key
-          require_certificate false
-
-          password_file /mosquitto/config/password_file
-          acl_file /mosquitto/config/aclfile
-          CONF
-
-          cat << 'ACL' > mosquitto/config/aclfile
-          user wms_device
-          topic write hospital/devices/+/telemetry
-          topic read hospital/devices/+/control
-
-          user wms_gateway
-          topic readwrite hospital/devices/#
-          ACL
-
-          docker run --rm -v "$(pwd)/mosquitto/config:/config" eclipse-mosquitto:2.0 sh -c "
-          mosquitto_passwd -c -b /config/password_file wms_device device_secure_pass && \
-          mosquitto_passwd -b /config/password_file wms_gateway gateway_secure_pass
-          "
-          chmod 644 mosquitto/config/*
-
-      - name: Start Database & Broker
-        run: |
-          docker compose up -d iot_database iot_broker
-
-      - name: Wait for Database and Broker Readiness
-        run: |
-          for i in {1..30}; do
-            if docker compose exec -T iot_database pg_isready -U dale_admin -d iot_telemetry; then
-              echo "Database is healthy and ready."
-              break
-            fi
-            echo "Waiting for database to initialize..."
-            sleep 2
-          done
-
-      - name: Initialize Database Schema
-        run: |
-          docker compose exec -T iot_database psql -U dale_admin -d iot_telemetry -c "
-          CREATE TABLE IF NOT EXISTS telemetry (
-              timestamp TIMESTAMPTZ NOT NULL,
-              serial_number TEXT NOT NULL,
-              zone TEXT,
-              firmware TEXT,
-              motor_state TEXT,
-              filter_status TEXT,
-              vacuum_pressure DOUBLE PRECISION,
-              fluid_volume DOUBLE PRECISION,
-              PRIMARY KEY (timestamp, serial_number)
-          );
-          SELECT create_hypertable('telemetry', 'timestamp', migrate_data => true, if_not_exists => true);
-          "
-
-      - name: Start Full Application Stack
-        run: |
-          docker compose up -d --build
-
-      - name: Wait for API Microservice
-        run: |
-          for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/devices || true)
-            if [ "$STATUS" = "200" ]; then
-              echo "API is online and accepting traffic."
-              break
-            fi
-            echo "Waiting for API to start (Current HTTP code: $STATUS)..."
-            sleep 2
-          done
-
-      - name: Run Integration & E2E Test Suite
-        run: |
-          docker compose exec -T telemetry_api pytest tests/ -v -p no:cov
-
-      - name: Output Container Logs on Failure
-        if: failure()
-        run: |
-          echo "=== API Logs ==="
-          docker compose logs telemetry_api
-          echo "=== Consumer Logs ==="
-          docker compose logs mqtt_consumer
-          echo "=== Ticketing Logs ==="
-          docker compose logs ticketing_service
-          echo "=== Broker Logs ==="
-          docker compose logs iot_broker
-
-      - name: Tear Down Stack
-        if: always()
-        run: |
-          docker compose down -v
+          pytest tests/ -v
