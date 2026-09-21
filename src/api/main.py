@@ -1,3 +1,5 @@
+import hashlib
+from fastapi.responses import FileResponse
 import json
 import logging
 import os
@@ -192,3 +194,51 @@ def reset_device(serial_number: str):
             reason="canister_serviced_manual_reset"
         )
     )
+
+
+class OTADeployRequest(BaseModel):
+    version: str = "v2.2.0"
+    operator: Optional[str] = "biomed_lead"
+
+
+@app.get("/firmware/{filename}")
+def download_firmware(filename: str):
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/firmware"))
+    filepath = os.path.join(base_dir, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Firmware binary not found")
+    return FileResponse(filepath, media_type="application/octet-stream", filename=filename)
+
+
+@app.post("/api/v1/devices/{serial_number}/ota")
+def trigger_ota_update(serial_number: str, request: OTADeployRequest):
+    filename = f"wms-{request.version}.bin"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/firmware"))
+    filepath = os.path.join(base_dir, filename)
+
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Binary {filename} not staged in static/firmware")
+
+    with open(filepath, "rb") as f:
+        sha256_hash = hashlib.sha256(f.read()).hexdigest()
+
+    payload = {
+        "command": "OTA_UPDATE",
+        "operator": request.operator,
+        "version": request.version,
+        "artifact_url": f"http://telemetry_api:8000/firmware/{filename}",
+        "sha256": sha256_hash
+    }
+
+    try:
+        topic = f"hospital/devices/{serial_number}/control"
+        publish_mqtt_command(topic, payload)
+        logging.info(f"Dispatched OTA_UPDATE {request.version} to {serial_number}")
+        return {
+            "status": "dispatched",
+            "serial_number": serial_number,
+            "manifest": payload
+        }
+    except Exception as e:
+        logging.error(f"Failed to publish OTA control message: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch OTA MQTT command: {e}")

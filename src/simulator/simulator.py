@@ -1,3 +1,5 @@
+import hashlib
+import urllib.request
 import os
 import ssl
 import time
@@ -78,6 +80,36 @@ def on_connect(client, userdata, flags, rc):
         logging.error(f"Failed to connect to MQTT broker, return code {rc}")
 
 
+
+def handle_ota_update(dev: dict, payload: dict):
+    sn = dev["serial_number"]
+    target_ver = payload.get("version")
+    url = payload.get("artifact_url")
+    expected_hash = payload.get("sha256")
+
+    if dev["motor_state"] == "RUNNING" and dev["vacuum_pressure"] > 0.0:
+        logging.warning(f"[{sn}] OTA REJECTED: Unit actively aspirating ({dev['vacuum_pressure']} mmHg)! Motor must be in STANDBY.")
+        return
+
+    logging.info(f"[{sn}] Safety interlocks clear. Downloading firmware {target_ver} from {url}...")
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = resp.read()
+    except Exception as e:
+        logging.error(f"[{sn}] OTA download failed: {e}")
+        return
+
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != expected_hash:
+        logging.error(f"[{sn}] OTA Checksum mismatch! Corrupt image.")
+        return
+
+    logging.info(f"[{sn}] SHA-256 verified ({digest[:10]}...). Staging firmware image.")
+    dev["firmware"] = target_ver
+    dev["motor_state"] = "STANDBY"
+    dev["vacuum_pressure"] = 0.0
+    logging.info(f"[{sn}] Firmware successfully upgraded to {target_ver}! Rebooted into STANDBY.")
+
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
@@ -89,6 +121,11 @@ def on_message(client, userdata, msg):
         operator = payload.get("operator", "system")
 
         logging.info(f"[MQTT RECV] Topic: {msg.topic} | Target: {sn} | Command: {cmd}")
+        if cmd == "OTA_UPDATE":
+            for dev in DEVICES:
+                if dev["serial_number"] == sn:
+                    handle_ota_update(dev, payload)
+            return
 
         if sn == "fleet" or msg.topic == "hospital/devices/fleet/control":
             for dev in DEVICES:
