@@ -80,7 +80,6 @@ def on_connect(client, userdata, flags, rc):
         logging.error(f"Failed to connect to MQTT broker, return code {rc}")
 
 
-
 def handle_ota_update(dev: dict, payload: dict):
     sn = dev["serial_number"]
     target_ver = payload.get("version")
