@@ -76,7 +76,14 @@ def test_mqtt_tls_publishing_and_db_ingestion():
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
     ca_path = CA_CERT_PATH if os.path.exists(CA_CERT_PATH) else "certs/ca.crt"
-    client.tls_set(ca_certs=ca_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+    cert_path = os.getenv("CLIENT_CERT_PATH", "certs/client.crt")
+    key_path = os.getenv("CLIENT_KEY_PATH", "certs/client.key")
+    client.tls_set(
+        ca_certs=ca_path,
+        certfile=cert_path if os.path.exists(cert_path) else None,
+        keyfile=key_path if os.path.exists(key_path) else None,
+        tls_version=ssl.PROTOCOL_TLS_CLIENT,
+    )
     client.tls_insecure_set(True)
 
     broker_host = resolve_broker_host(MQTT_HOST)
