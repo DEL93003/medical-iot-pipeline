@@ -16,3 +16,4 @@ data/
 incident_tickets.txt
 .venv/
 .docker_secrets/
+*.sql
