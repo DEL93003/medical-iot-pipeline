@@ -181,15 +181,18 @@ if not os.path.exists(resolved_cert_path):
             resolved_cert_path = fallback
             break
 
-if os.path.exists(resolved_cert_path):
-    logging.info(f"Loading CA certificate from {resolved_cert_path}")
-    client.tls_set(ca_certs=resolved_cert_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
-    client.tls_insecure_set(True)
-elif __name__ == "__main__":
-    logging.error(f"FATAL: CA certificate not found at {CA_CERT_PATH} or fallback paths!")
-    raise FileNotFoundError(f"Missing CA certificate at {CA_CERT_PATH}")
+if int(MQTT_PORT) == 8883:
+    if os.path.exists(resolved_cert_path):
+        logging.info(f"Loading CA certificate from {resolved_cert_path}")
+        client.tls_set(ca_certs=resolved_cert_path, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        client.tls_insecure_set(True)
+    elif __name__ == "__main__":
+        logging.error(f"FATAL: CA certificate not found at {CA_CERT_PATH} or fallback paths!")
+        raise FileNotFoundError(f"Missing CA certificate at {CA_CERT_PATH}")
+    else:
+        logging.warning(f"CA certificate not found at {CA_CERT_PATH}; skipping TLS setup for module import.")
 else:
-    logging.warning(f"CA certificate not found at {CA_CERT_PATH}; skipping TLS setup for module import.")
+    logging.info(f"Connecting without TLS on port {MQTT_PORT}")
 
 client.on_connect = on_connect
 client.on_message = on_message

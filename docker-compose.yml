@@ -54,7 +54,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - MQTT_HOST=iot_broker
-      - MQTT_PORT=8883
+      - MQTT_PORT=1883
       - MQTT_USER=wms_gateway
       - MQTT_PASSWORD=gateway_secure_pass
       - CA_CERT_PATH=/app/certs/ca.crt
@@ -90,7 +90,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - MQTT_HOST=iot_broker
-      - MQTT_PORT=8883
+      - MQTT_PORT=1883
       - MQTT_USER=wms_gateway
       - MQTT_PASSWORD=gateway_secure_pass
       - CA_CERT_PATH=/app/certs/ca.crt

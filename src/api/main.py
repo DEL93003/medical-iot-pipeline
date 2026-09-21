@@ -65,7 +65,7 @@ def init_mqtt():
         )
         mqtt_client.username_pw_set(user, password)
 
-        if os.path.exists(CA_CERT_PATH):
+        if MQTT_PORT == 8883 and os.path.exists(CA_CERT_PATH):
             mqtt_client.tls_set(
                 ca_certs=CA_CERT_PATH,
                 tls_version=ssl.PROTOCOL_TLSv1_2
