@@ -17,3 +17,8 @@ incident_tickets.txt
 .venv/
 .docker_secrets/
 *.sql
+
+# Cryptographic private keys and cert backups
+certs/*.key
+*.key
+certs_backup*/
