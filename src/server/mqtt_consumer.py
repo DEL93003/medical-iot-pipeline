@@ -25,7 +25,7 @@ MQTT_USER = os.getenv("MQTT_USER", "wms_gateway")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "gateway_secure_pass")
 CA_CERT_PATH = os.getenv("CA_CERT_PATH", "/app/certs/ca.crt")
 TICKETING_WEBHOOK_URL = os.getenv("TICKETING_WEBHOOK_URL", "http://ticketing_service:6000/webhook")
-ENABLE_TICKETING_WEBHOOK = os.getenv("ENABLE_TICKETING_WEBHOOK", "false").lower() in ("true", "1", "yes")
+ENABLE_TICKETING_WEBHOOK = os.getenv("ENABLE_TICKETING_WEBHOOK", "true").lower() in ("true", "1", "yes")
 
 ALERT_COOLDOWN_SECONDS = 30
 recent_alerts = {}
